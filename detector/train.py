@@ -6,12 +6,13 @@ Usage :
 Notes :
 - pas de retournement miroir (fliplr=0) : un "7" ou un "R" en miroir n'existe pas ;
 - les rotations sont déjà dans le générateur ;
-- tourne sur CPU (quelques heures) ; sur GPU, ajouter --device 0.
+- --device auto : GPU NVIDIA (cuda) si présent, sinon GPU Apple (mps), sinon CPU.
 """
 
 import argparse
 from pathlib import Path
 
+import torch
 from ultralytics import YOLO
 
 ROOT = Path(__file__).parent
@@ -24,12 +25,21 @@ def main():
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--batch", type=int, default=16)
-    ap.add_argument("--device", default="cpu")
+    ap.add_argument("--device", default="auto")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--name", default="cards")
     ap.add_argument("--fraction", type=float, default=1.0, help="fraction du dataset utilisée")
     ap.add_argument("--resume", action="store_true")
     a = ap.parse_args()
+
+    if a.device == "auto":
+        if torch.cuda.is_available():
+            a.device = "0"
+        elif torch.backends.mps.is_available():
+            a.device = "mps"
+        else:
+            a.device = "cpu"
+    print("entraînement sur :", a.device)
 
     model = YOLO(a.model)
     model.train(

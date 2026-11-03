@@ -12,11 +12,17 @@ Usage :
 
 from __future__ import annotations
 
+import os
+
+# un seul thread par processus : le parallélisme se fait entre processus
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_v, "1")
+
 import argparse
 import glob
 import json
 import math
-import os
+import pickle
 from multiprocessing import Pool
 from pathlib import Path
 
@@ -409,12 +415,36 @@ def photometric(rng, img):
 # --------------------------------------------------------------------------
 
 _DECKS = None
+DECK_CACHE = ROOT / "data" / "decks_cache.pkl"
+
+
+def _deck_signature():
+    """Change quand un jeu sur disque ou le code procédural change -> cache invalidé."""
+    files = sorted(DECKS_DIR.rglob("*")) if DECKS_DIR.exists() else []
+    sig = [(str(f.relative_to(ROOT)), f.stat().st_mtime_ns) for f in files if f.is_file()]
+    sig.append(("procedural.py", (ROOT / "procedural.py").stat().st_mtime_ns))
+    sig.append(("styles", N_PROC_STYLES, DECK_SEED))
+    return sig
+
+
+def load_decks_cached():
+    sig = _deck_signature()
+    if DECK_CACHE.exists():
+        with open(DECK_CACHE, "rb") as f:
+            cached_sig, decks = pickle.load(f)
+        if cached_sig == sig:
+            return decks
+    decks = build_decks()
+    DECK_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    with open(DECK_CACHE, "wb") as f:
+        pickle.dump((sig, decks), f, protocol=pickle.HIGHEST_PROTOCOL)
+    return decks
 
 
 def _init_worker():
     global _DECKS
     cv2.setNumThreads(1)
-    _DECKS = build_decks()
+    _DECKS = load_decks_cached()
 
 
 SIZES = [(960, 720), (720, 960), (832, 832), (1024, 768), (768, 1024)]
@@ -463,6 +493,8 @@ def main():
         f"names:\n" + "".join(f"  {i}: '{c}'\n" for i, c in enumerate(CLASSES)))
     jobs = [("train", i, out, a.seed, a.preview) for i in range(a.train)]
     jobs += [("val", i, out, a.seed, a.preview) for i in range(a.val)]
+    print("préparation des jeux de cartes…", flush=True)
+    load_decks_cached()  # construit le cache une fois, partagé par les processus
     total = 0
     with Pool(a.workers, initializer=_init_worker) as pool:
         for k, n in enumerate(pool.imap_unordered(_job, jobs, chunksize=8)):
