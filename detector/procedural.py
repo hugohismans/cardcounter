@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import glob
 import math
+from pathlib import Path
 from dataclasses import dataclass
 
 import numpy as np
@@ -33,8 +34,15 @@ def list_fonts() -> list[str]:
     for pat in ("/usr/share/fonts/**/*.ttf", "/usr/share/fonts/**/*.otf"):
         fonts += glob.glob(pat, recursive=True)
     bad = ("Emoji", "Mono", "IPA", "Symbol", "Loma", "Thin", "ExtraLight", "Hairline", "Italic", "Oblique")
-    fonts = [f for f in fonts if not any(b in f for b in bad)]
-    return sorted(fonts)
+    try:  # polices DejaVu fournies avec matplotlib (toujours présentes avec ultralytics)
+        import matplotlib
+        fonts += glob.glob(str(Path(matplotlib.get_data_path()) / "fonts/ttf/*.ttf"))
+    except ImportError:
+        pass
+    fonts = [f for f in fonts if not any(b in Path(f).name for b in bad)]
+    if not fonts:
+        raise RuntimeError("aucune police TrueType trouvée (installer fonts-dejavu ou matplotlib)")
+    return sorted(set(fonts))
 
 
 # --------------------------------------------------------------------------
