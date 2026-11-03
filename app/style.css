@@ -107,3 +107,7 @@ dialog::backdrop { background: rgb(0 0 0 / .4); }
 #pickerGrid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin: 10px 0; }
 #pickerGrid .c { min-width: 0; padding: 6px 0; font-size: 13px; }
 #pickerGrid .c:disabled { opacity: .25; }
+.menu { display: grid; gap: 8px; margin-top: 12px; }
+.menu button { font: inherit; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.menu button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.c .alt { display: block; font-size: 10px; color: var(--warn); font-weight: 600; }

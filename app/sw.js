@@ -1,5 +1,5 @@
 // Service worker : met l'appli et le modèle en cache pour un usage 100 % hors ligne.
-const CACHE = 'cardcounter-v1';
+const CACHE = 'cardcounter-v2';
 const FILES = [
   './', 'index.html', 'style.css', 'manifest.webmanifest', 'icon.svg',
   'src/main.js', 'src/cards.js', 'src/scoring.js', 'src/detector.js',

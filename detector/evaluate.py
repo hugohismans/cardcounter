@@ -59,7 +59,8 @@ def main():
         truth = truth_for(p)
         if truth is None:
             continue
-        r = model.predict(str(p), imgsz=a.imgsz, conf=a.conf, verbose=False)[0]
+        # comme l'appli : un index = une seule carte (NMS toutes classes confondues)
+        r = model.predict(str(p), imgsz=a.imgsz, conf=a.conf, iou=0.6, agnostic_nms=True, verbose=False)[0]
         best = {}
         for b in r.boxes:
             c = CLASSES[int(b.cls)]

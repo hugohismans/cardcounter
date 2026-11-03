@@ -1,4 +1,4 @@
-import { ALL_CARDS, RANKS, SUITS, SUIT_SYMBOL, SUIT_NAME, RANK_SHORT, parseCard } from './cards.js';
+import { RANKS, SUITS, SUIT_SYMBOL, SUIT_NAME, RANK_NAME, RANK_SHORT, parseCard } from './cards.js';
 import { scoreBelote, scoreManille, beloteCardValue, MANILLE_VALUES, ANNOUNCEMENTS } from './scoring.js';
 import { CardDetector } from './detector.js';
 
@@ -114,7 +114,7 @@ async function onPhoto(file) {
     const det = await getDetector();
     const res = await det.detect(img);
     state.detections = res.detections;
-    state.cards = new Map(res.cards.map((c) => [c.card, { score: c.score, sure: c.sure }]));
+    state.cards = new Map(res.cards.map((c) => [c.card, { score: c.score, sure: c.sure, alts: c.alts }]));
     const unsure = res.cards.filter((c) => !c.sure).length;
     setStatus(`${res.cards.length} cartes reconnues en ${Math.round(res.ms)} ms` +
       (unsure ? ` — ${unsure} à vérifier (en orange)` : ''));
@@ -172,6 +172,8 @@ function cardButton(id, { onClick, disabled = false, info } = {}) {
   b.innerHTML = `${RANK_SHORT[rank]}${SUIT_SYMBOL[suit]}`;
   const pts = cardPoints(id);
   if (info && pts !== null) b.innerHTML += `<small>${pts} pt${pts > 1 ? 's' : ''}</small>`;
+  const alt = info?.sure === false && info.alts?.find((a) => !state.cards.has(a.card));
+  if (alt) b.innerHTML += `<span class="alt">ou ${shortLabel(alt.card)} ?</span>`;
   b.disabled = disabled;
   if (onClick) b.onclick = onClick;
   return b;
@@ -194,14 +196,7 @@ function renderCards() {
     let sum = 0;
     for (const id of ids) {
       sum += cardPoints(id) ?? 0;
-      row.appendChild(cardButton(id, {
-        info: state.cards.get(id),
-        onClick: () => {
-          state.cards.delete(id);
-          drawPreview();
-          render();
-        },
-      }));
+      row.appendChild(cardButton(id, { info: state.cards.get(id), onClick: () => openCardMenu(id) }));
     }
     const t = document.createElement('span');
     t.className = 'sum';
@@ -209,6 +204,43 @@ function renderCards() {
     row.appendChild(t);
     list.appendChild(row);
   }
+}
+
+function shortLabel(id) {
+  const { rank, suit } = parseCard(id);
+  return RANK_SHORT[rank] + SUIT_SYMBOL[suit];
+}
+
+function openCardMenu(id) {
+  const info = state.cards.get(id);
+  const { rank, suit } = parseCard(id);
+  $('cardMenuTitle').textContent = `${RANK_NAME[rank]} de ${SUIT_NAME[suit].toLowerCase()}`;
+  $('cardMenuInfo').textContent = info.score < 1 ? `Confiance du détecteur : ${Math.round(info.score * 100)} %` : 'Ajoutée à la main';
+  const box = $('cardMenuActions');
+  box.innerHTML = '';
+  const action = (label, fn, primary = false) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    if (primary) b.className = 'primary';
+    b.onclick = () => {
+      fn();
+      $('cardMenu').close();
+      drawPreview();
+      render();
+    };
+    box.appendChild(b);
+  };
+  if (!info.sure) action(`C'est bien ${shortLabel(id)}`, () => { info.sure = true; }, true);
+  for (const a of (info.alts ?? []).filter((x) => !state.cards.has(x.card))) {
+    action(`Remplacer par ${shortLabel(a.card)}`, () => {
+      state.cards.delete(id);
+      state.cards.set(a.card, { score: a.score, sure: true, alts: [] });
+      for (const d of state.detections) if (d.card === id) d.card = a.card;
+    });
+  }
+  action('Retirer cette carte', () => state.cards.delete(id));
+  action('Annuler', () => {});
+  $('cardMenu').showModal();
 }
 
 function openPicker() {
@@ -220,7 +252,7 @@ function openPicker() {
       grid.appendChild(cardButton(id, {
         disabled: state.cards.has(id),
         onClick: () => {
-          state.cards.set(id, { score: 1, sure: true });
+          state.cards.set(id, { score: 1, sure: true, alts: [] });
           $('picker').close();
           render();
         },

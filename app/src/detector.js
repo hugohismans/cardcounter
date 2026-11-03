@@ -12,7 +12,9 @@ import { ALL_CARDS } from './cards.js';
 export const DEFAULTS = {
   minScore: 0.25, // en dessous : ignoré
   sureScore: 0.6, // en dessous : carte affichée comme "à vérifier"
-  iou: 0.5,
+  iou: 0.5, // même carte, boîtes qui se recouvrent -> doublon
+  crossIou: 0.6, // cartes différentes au même endroit -> un seul index, on garde la plus probable
+  altScore: 0.3, // une alternative au-dessus de ce score rend la carte "à vérifier"
 };
 
 /** Paramètres du letterbox (redimensionnement en gardant les proportions + bandes grises). */
@@ -45,11 +47,25 @@ function iou(a, b) {
   return ua > 0 ? inter / ua : 0;
 }
 
-function nms(dets, thr) {
+function nms(dets, thr, crossThr) {
   dets.sort((a, b) => b.score - a.score);
   const keep = [];
   for (const d of dets) {
-    if (keep.every((k) => k.cls !== d.cls || iou(k.box, d.box) < thr)) keep.push(d);
+    let suppressed = false;
+    for (const k of keep) {
+      const o = iou(k.box, d.box);
+      if (k.cls === d.cls && o >= thr) {
+        suppressed = true;
+        break;
+      }
+      if (k.cls !== d.cls && o >= crossThr) {
+        // un index ne peut être qu'une seule carte : on garde la plus probable, l'autre devient une alternative
+        if (!k.alts.some((a) => a.card === d.card)) k.alts.push({ card: d.card, score: d.score });
+        suppressed = true;
+        break;
+      }
+    }
+    if (!suppressed) keep.push(d);
   }
   return keep;
 }
@@ -60,7 +76,9 @@ function nms(dets, thr) {
  * - modèle classique : [1, 4 + nc, A] = cx, cy, w, h, scores... (NMS ici)
  * Les boîtes sont renvoyées en pixels de l'image d'origine.
  */
-export function decodeOutput(dims, data, lb, { minScore = DEFAULTS.minScore, iou: iouThr = DEFAULTS.iou } = {}) {
+export function decodeOutput(dims, data, lb, {
+  minScore = DEFAULTS.minScore, iou: iouThr = DEFAULTS.iou, crossIou = DEFAULTS.crossIou,
+} = {}) {
   const nc = ALL_CARDS.length;
   const unmap = (x, y) => [(x - lb.padX) / lb.ratio, (y - lb.padY) / lb.ratio];
   let dets = [];
@@ -73,7 +91,7 @@ export function decodeOutput(dims, data, lb, { minScore = DEFAULTS.minScore, iou
       const [x0, y0] = unmap(data[o], data[o + 1]);
       const [x1, y1] = unmap(data[o + 2], data[o + 3]);
       const cls = Math.round(data[o + 5]);
-      dets.push({ cls, card: ALL_CARDS[cls], score, box: [x0, y0, x1, y1] });
+      dets.push({ cls, card: ALL_CARDS[cls], score, box: [x0, y0, x1, y1], alts: [] });
     }
   } else if (dims.length === 3 && dims[1] === 4 + nc) {
     const A = dims[2];
@@ -94,12 +112,12 @@ export function decodeOutput(dims, data, lb, { minScore = DEFAULTS.minScore, iou
       const h = data[3 * A + a];
       const [x0, y0] = unmap(cx - w / 2, cy - h / 2);
       const [x1, y1] = unmap(cx + w / 2, cy + h / 2);
-      dets.push({ cls, card: ALL_CARDS[cls], score: best, box: [x0, y0, x1, y1] });
+      dets.push({ cls, card: ALL_CARDS[cls], score: best, box: [x0, y0, x1, y1], alts: [] });
     }
   } else {
     throw new Error(`Sortie de modèle inattendue : [${dims.join(', ')}]`);
   }
-  dets = nms(dets, iouThr);
+  dets = nms(dets, iouThr, crossIou);
   return dets;
 }
 
@@ -107,16 +125,22 @@ export function decodeOutput(dims, data, lb, { minScore = DEFAULTS.minScore, iou
  * Regroupe les détections par carte (une carte n'existe qu'une fois dans le jeu).
  * Renvoie [{ card, score, sure, boxes }], trié par score décroissant.
  */
-export function groupByCard(dets, { sureScore = DEFAULTS.sureScore } = {}) {
+export function groupByCard(dets, { sureScore = DEFAULTS.sureScore, altScore = DEFAULTS.altScore } = {}) {
   const byCard = new Map();
   for (const d of dets) {
-    const g = byCard.get(d.card) ?? { card: d.card, score: 0, boxes: [] };
+    const g = byCard.get(d.card) ?? { card: d.card, score: 0, boxes: [], alts: [] };
     g.score = Math.max(g.score, d.score);
     g.boxes.push({ box: d.box, score: d.score });
+    for (const a of d.alts) if (!g.alts.some((x) => x.card === a.card)) g.alts.push(a);
     byCard.set(d.card, g);
   }
+  const found = new Set(byCard.keys());
   return [...byCard.values()]
-    .map((g) => ({ ...g, sure: g.score >= sureScore }))
+    .map((g) => {
+      // une alternative déjà vue ailleurs dans la photo n'est pas crédible (chaque carte est unique)
+      const alts = g.alts.filter((a) => a.score >= altScore && !found.has(a.card)).sort((a, b) => b.score - a.score);
+      return { ...g, alts, sure: g.score >= sureScore && alts.length === 0 };
+    })
     .sort((a, b) => b.score - a.score);
 }
 

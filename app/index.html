@@ -39,7 +39,7 @@
         <h2>Cartes reconnues <span id="cardCount" class="pill"></span></h2>
         <button class="link" id="addCard">+ Ajouter</button>
       </div>
-      <p class="hint">Touchez une carte pour la retirer. En orange : à vérifier.</p>
+      <p class="hint">Touchez une carte pour la corriger. En orange : à vérifier.</p>
       <div id="cardList"></div>
     </section>
 
@@ -80,6 +80,14 @@
       <h2>Ajouter une carte</h2>
       <div id="pickerGrid"></div>
       <button class="link" value="close">Fermer</button>
+    </form>
+  </dialog>
+
+  <dialog id="cardMenu">
+    <form method="dialog">
+      <h2 id="cardMenuTitle"></h2>
+      <p class="hint" id="cardMenuInfo"></p>
+      <div class="menu" id="cardMenuActions"></div>
     </form>
   </dialog>
 
