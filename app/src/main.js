@@ -1,22 +1,59 @@
 import { RANKS, SUITS, SUIT_SYMBOL, SUIT_NAME, RANK_NAME, RANK_SHORT, parseCard } from './cards.js';
-import { scoreBelote, scoreManille, beloteCardValue, MANILLE_VALUES, ANNOUNCEMENTS } from './scoring.js';
+import {
+  scoreBelote, scoreManille, beloteCardValue, MANILLE_VALUES, ANNOUNCEMENTS, BELOTE_HAND_TOTAL, MANILLE_TOTAL,
+} from './scoring.js';
 import { CardDetector } from './detector.js';
+import { GAME_TYPES, newGame, handFromResult, computeGame, addHand, removeHand, editHandScore } from './game.js';
 
 const $ = (id) => document.getElementById(id);
 const RED = new Set(['H', 'D']);
+const STORE_KEY = 'cardcounter.v1';
 
-const state = {
-  game: 'belote',
-  trump: null,
-  cards: new Map(), // id -> { score, sure }
-  der: 'us',
-  belote: null,
-  taker: null,
-  announcements: { us: [], them: [] },
-  mult: 1,
-  image: null,
-  detections: [],
-};
+// ---------------------------------------------------------------------------
+// État : partie (sauvegardée) + donne en cours de saisie
+// ---------------------------------------------------------------------------
+
+function loadStore() {
+  try {
+    const s = JSON.parse(localStorage.getItem(STORE_KEY));
+    if (s?.game?.hands) return s;
+  } catch { /* stockage indisponible ou corrompu */ }
+  return { game: newGame({ type: 'belote' }), archive: [] };
+}
+const store = loadStore();
+function saveStore() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(store));
+  } catch { /* navigation privée : la partie ne sera pas conservée */ }
+}
+
+function freshHand() {
+  return {
+    mode: 'photo',
+    trump: null,
+    cards: new Map(), // id -> { score, sure, alts }
+    photoTeam: 'us',
+    manualTeam: 'us',
+    manualValue: '',
+    capotTeam: 'us',
+    der: 'us',
+    belote: null,
+    taker: null,
+    announcements: { us: [], them: [] },
+    mult: 1,
+    image: null,
+    detections: [],
+  };
+}
+let hand = freshHand();
+
+const game = () => store.game;
+const teamName = (k) => game().teams[k];
+const other = (k) => (k === 'us' ? 'them' : 'us');
+
+// ---------------------------------------------------------------------------
+// Détecteur (chargé en arrière-plan)
+// ---------------------------------------------------------------------------
 
 let detector = null;
 async function getDetector() {
@@ -30,7 +67,72 @@ async function getDetector() {
 }
 
 // ---------------------------------------------------------------------------
-// Contrôles
+// Calcul de la donne en cours
+// ---------------------------------------------------------------------------
+
+/** Inverse nous/eux dans un objet de résultat (pour photographier ou compter l'autre équipe). */
+function swapTeams(v, key = '') {
+  if (v === 'us' || v === 'them') return ['capot', 'taker', 'lastTrick', 'belote'].includes(key) ? other(v) : v;
+  if (Array.isArray(v)) return v.map((x) => swapTeams(x));
+  if (v && typeof v === 'object') {
+    const out = {};
+    for (const [k, x] of Object.entries(v)) {
+      const nk = k === 'us' ? 'them' : k === 'them' ? 'us' : k;
+      out[nk] = swapTeams(x, k);
+    }
+    return out;
+  }
+  return v;
+}
+
+/** Résultat de la donne en cours, ou { error } si la saisie est incomplète. */
+function computeHand() {
+  const h = hand;
+  const isBelote = game().type === 'belote';
+  // équipe de référence pour les cartes / points saisis
+  const ref = h.mode === 'photo' ? h.photoTeam : h.mode === 'manual' ? h.manualTeam : 'us';
+  const flip = ref === 'them';
+  const sw = (x) => (flip ? swapTeams(x) : x);
+
+  if (h.mode === 'photo' && isBelote && !h.trump) return { error: 'Choisissez l’atout pour calculer les points.' };
+  if (h.mode === 'manual' && h.manualValue === '') return { error: 'Saisissez les points comptés.' };
+
+  let r;
+  if (isBelote) {
+    const common = sw({
+      announcements: h.announcements, belote: h.belote, taker: h.taker, lastTrick: h.der,
+    });
+    if (h.mode === 'capot') {
+      r = scoreBelote({ capot: h.capotTeam, announcements: h.announcements, belote: h.belote, taker: h.taker });
+      return r;
+    }
+    r = scoreBelote({
+      ...common,
+      trump: h.trump,
+      cards: h.mode === 'photo' ? [...h.cards.keys()] : null,
+      manualPoints: h.mode === 'manual' ? Number(h.manualValue) : null,
+      announcements: common.announcements,
+      belote: common.belote,
+      taker: common.taker,
+      lastTrick: common.lastTrick,
+    });
+  } else {
+    r = scoreManille({
+      trump: h.trump || null,
+      multiplier: h.mult,
+      cards: h.mode === 'photo' ? [...h.cards.keys()] : null,
+      manualPoints: h.mode === 'manual' ? Number(h.manualValue) : null,
+    });
+  }
+  if (flip) {
+    const { warnings, cards, ...rest } = r;
+    r = { ...swapTeams(rest), warnings, cards, trump: r.trump, mode: r.mode, game: r.game };
+  }
+  return r;
+}
+
+// ---------------------------------------------------------------------------
+// Contrôles génériques
 // ---------------------------------------------------------------------------
 
 function bindSeg(id, onChange) {
@@ -38,26 +140,153 @@ function bindSeg(id, onChange) {
   el.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
-    el.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    setSeg(id, b.dataset.v);
     onChange(b.dataset.v);
   });
 }
+function setSeg(id, value) {
+  $(id).querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.v === String(value ?? '')));
+}
+
+function renderTeamLabels() {
+  document.querySelectorAll('.teamseg button[data-v="us"], .tname[data-team="us"]').forEach((b) => { b.textContent = teamName('us'); });
+  document.querySelectorAll('.teamseg button[data-v="them"], .tname[data-team="them"]').forEach((b) => { b.textContent = teamName('them'); });
+}
+
+// ---------------------------------------------------------------------------
+// Vue PARTIE
+// ---------------------------------------------------------------------------
+
+const OUTCOME = { dedans: 'Dedans', litige: 'Litige' };
+const MODE_ICON = { cards: '📷', manual: '✍️', capot: '🏆' };
+
+function renderGame() {
+  const g = game();
+  const res = computeGame(g);
+  $('subtitle').textContent = `${GAME_TYPES[g.type].label} · partie en ${g.target}`;
+
+  $('board').innerHTML = ['us', 'them'].map((k) => {
+    const pct = Math.min(100, (res.totals[k] / g.target) * 100);
+    const lead = res.totals[k] > res.totals[other(k)];
+    return `<div class="score-team ${lead ? 'lead' : ''} ${res.winner === k ? 'won' : ''}">
+      <div class="tn">${escapeHtml(teamName(k))}</div>
+      <div class="total">${res.totals[k]}</div>
+      <div class="bar"><span style="width:${pct}%"></span></div>
+      <div class="hint">reste ${Math.max(0, g.target - res.totals[k])}</div>
+    </div>`;
+  }).join('');
+
+  $('winner').hidden = !res.winner;
+  if (res.winner) $('winner').innerHTML = `🏆 <b>${escapeHtml(teamName(res.winner))}</b> gagne la partie !`;
+  $('reserveNote').hidden = !res.reserve;
+  $('reserveNote').textContent = `Litige : ${res.reserve} points en réserve pour le gagnant de la prochaine donne.`;
+
+  $('handCount').textContent = g.hands.length;
+  $('noHands').hidden = g.hands.length > 0;
+  const list = $('handsList');
+  list.innerHTML = g.hands.length
+    ? `<div class="hand-head"><span></span><span></span><span>${escapeHtml(teamName('us'))}</span><span>${escapeHtml(teamName('them'))}</span><span>total</span></div>`
+    : '';
+  [...res.rows].reverse().forEach((row) => {
+    const h = row.hand;
+    const div = document.createElement('button');
+    div.type = 'button';
+    div.className = 'hand-row';
+    const badges = [];
+    if (h.capot) badges.push(`<span class="badge">Capot ${escapeHtml(teamName(h.capot))}</span>`);
+    if (OUTCOME[h.outcome]) badges.push(`<span class="badge">${OUTCOME[h.outcome]}</span>`);
+    if (h.edited) badges.push('<span class="badge soft">modifiée</span>');
+    const bonus = (k) => (row.bonus[k] ? ` <small class="plus">+${row.bonus[k]}</small>` : '');
+    const trump = h.trump ? `<span class="${RED.has(h.trump) ? 'red' : ''}">${SUIT_SYMBOL[h.trump]}</span>` : '';
+    div.innerHTML = `
+      <span class="n">${row.index + 1}</span>
+      <span class="meta">${MODE_ICON[h.mode] ?? ''} ${trump} ${badges.join(' ')}</span>
+      <span class="pts">${h.score.us}${bonus('us')}</span>
+      <span class="pts">${h.score.them}${bonus('them')}</span>
+      <span class="cum">${row.total.us} – ${row.total.them}</span>`;
+    div.onclick = () => openHandDialog(row.index);
+    list.appendChild(div);
+  });
+  $('newHandBtn').disabled = !!res.winner;
+  $('newHandBtn').textContent = res.winner ? 'Partie terminée' : '+ Nouvelle donne';
+}
+
+function openHandDialog(index) {
+  const h = game().hands[index];
+  $('handDialogTitle').textContent = `Donne ${index + 1}`;
+  const raw = h.raw ? ` — ${h.raw.us} / ${h.raw.them} points` : '';
+  $('handDialogInfo').textContent = `Corrigez le score si besoin${raw}.`;
+  $('editUs').value = h.score.us;
+  $('editThem').value = h.score.them;
+  const dlg = $('handDialog');
+  dlg.onclose = () => {
+    if (dlg.returnValue === 'save') {
+      store.game = editHandScore(game(), index, { us: $('editUs').value, them: $('editThem').value });
+    } else if (dlg.returnValue === 'delete') {
+      if (!confirm(`Supprimer la donne ${index + 1} ?`)) return;
+      store.game = removeHand(game(), index);
+    } else return;
+    saveStore();
+    renderGame();
+  };
+  dlg.returnValue = '';
+  dlg.showModal();
+}
+
+function openNewGameDialog() {
+  const g = game();
+  let type = g.type;
+  setSeg('ngType', type);
+  $('ngUs').value = g.teams.us === 'Nous' ? '' : g.teams.us;
+  $('ngThem').value = g.teams.them === 'Eux' ? '' : g.teams.them;
+  const setType = (t) => {
+    type = t;
+    $('ngTarget').value = GAME_TYPES[t].target;
+    $('ngHint').textContent = t === 'belote'
+      ? 'Belote : scores comptés sur 10 (162 points = 16). 100 = partie en 1000 points.'
+      : 'Manille : chaque équipe marque ses points au-delà de 30.';
+  };
+  setType(type);
+  $('ngType').onclick = (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    setSeg('ngType', b.dataset.v);
+    setType(b.dataset.v);
+  };
+  const dlg = $('newGameDialog');
+  dlg.onclose = () => {
+    if (dlg.returnValue !== 'ok') return;
+    if (game().hands.length) {
+      store.archive = [{ ...game(), endedAt: new Date().toISOString() }, ...(store.archive ?? [])].slice(0, 20);
+    }
+    store.game = newGame({ type, teams: { us: $('ngUs').value, them: $('ngThem').value }, target: $('ngTarget').value });
+    saveStore();
+    hand = freshHand();
+    showView('game');
+  };
+  dlg.returnValue = '';
+  dlg.showModal();
+}
+
+// ---------------------------------------------------------------------------
+// Vue DONNE
+// ---------------------------------------------------------------------------
 
 function renderTrump() {
   const el = $('trump');
   const opts = [...SUITS];
-  if (state.game === 'manille') opts.push('');
+  if (game().type === 'manille') opts.push('');
   el.classList.toggle('five', opts.length === 5);
   el.innerHTML = '';
   for (const s of opts) {
     const b = document.createElement('button');
     b.textContent = s ? SUIT_SYMBOL[s] : 'Sans atout';
     b.title = s ? SUIT_NAME[s] : 'Sans atout';
-    b.className = (RED.has(s) ? 'red ' : '') + (s ? '' : 'na ') + (state.trump === s ? 'on' : '');
+    b.className = (RED.has(s) ? 'red ' : '') + (s ? '' : 'na ') + (hand.trump === s ? 'on' : '');
     b.onclick = () => {
-      state.trump = s;
+      hand.trump = s;
       renderTrump();
-      render();
+      renderHand();
     };
     el.appendChild(b);
   }
@@ -68,9 +297,9 @@ function fillAnnouncementSelects() {
     sel.innerHTML = '<option value="">+ annonce…</option>' +
       Object.entries(ANNOUNCEMENTS).map(([k, a]) => `<option value="${k}">${a.label} (${a.points})</option>`).join('');
     sel.onchange = () => {
-      if (sel.value) state.announcements[sel.dataset.team].push(sel.value);
+      if (sel.value) hand.announcements[sel.dataset.team].push(sel.value);
       sel.value = '';
-      render();
+      renderHand();
     };
   }
 }
@@ -79,22 +308,19 @@ function renderAnnouncements() {
   for (const team of ['us', 'them']) {
     const el = $(team === 'us' ? 'annUs' : 'annThem');
     el.innerHTML = '';
-    state.announcements[team].forEach((k, i) => {
+    hand.announcements[team].forEach((k, i) => {
       const b = document.createElement('button');
+      b.type = 'button';
       b.className = 'chip';
       b.textContent = `${ANNOUNCEMENTS[k].label} ✕`;
       b.onclick = () => {
-        state.announcements[team].splice(i, 1);
-        render();
+        hand.announcements[team].splice(i, 1);
+        renderHand();
       };
       el.appendChild(b);
     });
   }
 }
-
-// ---------------------------------------------------------------------------
-// Photo + détection
-// ---------------------------------------------------------------------------
 
 function setStatus(msg, error = false) {
   const el = $('status');
@@ -106,15 +332,15 @@ function setStatus(msg, error = false) {
 async function onPhoto(file) {
   if (!file) return;
   const img = await createImageBitmap(file, { imageOrientation: 'from-image' });
-  state.image = img;
-  state.detections = [];
+  hand.image = img;
+  hand.detections = [];
   drawPreview();
   setStatus('Analyse de la photo…');
   try {
     const det = await getDetector();
     const res = await det.detect(img);
-    state.detections = res.detections;
-    state.cards = new Map(res.cards.map((c) => [c.card, { score: c.score, sure: c.sure, alts: c.alts }]));
+    hand.detections = res.detections;
+    hand.cards = new Map(res.cards.map((c) => [c.card, { score: c.score, sure: c.sure, alts: c.alts }]));
     const unsure = res.cards.filter((c) => !c.sure).length;
     setStatus(`${res.cards.length} cartes reconnues en ${Math.round(res.ms)} ms` +
       (unsure ? ` — ${unsure} à vérifier (en orange)` : ''));
@@ -122,12 +348,13 @@ async function onPhoto(file) {
     console.error(err);
     setStatus(`Échec de l'analyse : ${err.message}`, true);
   }
+  $('photo').value = '';
   drawPreview();
-  render();
+  renderHand();
 }
 
 function drawPreview() {
-  const img = state.image;
+  const img = hand.image;
   $('photoWrap').hidden = !img;
   if (!img) return;
   const c = $('preview');
@@ -136,43 +363,43 @@ function drawPreview() {
   c.height = Math.round(img.height * scale);
   const ctx = c.getContext('2d');
   ctx.drawImage(img, 0, 0, c.width, c.height);
+  const fs = Math.max(12, Math.round(c.width / 45));
   ctx.lineWidth = Math.max(2, c.width / 400);
-  ctx.font = `bold ${Math.max(12, c.width / 45)}px system-ui`;
-  for (const d of state.detections) {
-    if (!state.cards.has(d.card)) continue;
+  ctx.font = `bold ${fs}px system-ui`;
+  for (const d of hand.detections) {
+    if (!hand.cards.has(d.card)) continue;
     const [x0, y0, x1, y1] = d.box.map((v) => v * scale);
-    const sure = state.cards.get(d.card).sure;
-    ctx.strokeStyle = sure ? '#22c55e' : '#f59e0b';
+    const color = hand.cards.get(d.card).sure ? '#22c55e' : '#f59e0b';
+    ctx.strokeStyle = color;
     ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
-    const { rank, suit } = parseCard(d.card);
-    const label = RANK_SHORT[rank] + SUIT_SYMBOL[suit];
-    const tw = ctx.measureText(label).width + 6;
-    ctx.fillStyle = sure ? '#22c55e' : '#f59e0b';
-    ctx.fillRect(x0, y0 - parseInt(ctx.font.match(/\d+/)[0], 10) - 4, tw, parseInt(ctx.font.match(/\d+/)[0], 10) + 4);
+    const label = shortLabel(d.card);
+    ctx.fillStyle = color;
+    ctx.fillRect(x0, y0 - fs - 4, ctx.measureText(label).width + 6, fs + 4);
     ctx.fillStyle = '#000';
     ctx.fillText(label, x0 + 3, y0 - 3);
   }
 }
 
-// ---------------------------------------------------------------------------
-// Récap
-// ---------------------------------------------------------------------------
+function shortLabel(id) {
+  const { rank, suit } = parseCard(id);
+  return RANK_SHORT[rank] + SUIT_SYMBOL[suit];
+}
 
 function cardPoints(id) {
-  if (state.game === 'belote') return state.trump ? beloteCardValue(id, state.trump) : null;
+  if (game().type === 'belote') return hand.trump ? beloteCardValue(id, hand.trump) : null;
   return MANILLE_VALUES[parseCard(id).rank];
 }
 
 function cardButton(id, { onClick, disabled = false, info } = {}) {
-  const { rank, suit } = parseCard(id);
+  const { suit } = parseCard(id);
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'c' + (RED.has(suit) ? ' red' : '') + (info?.sure === false ? ' unsure' : '') +
-    (state.trump === suit ? ' trump' : '');
-  b.innerHTML = `${RANK_SHORT[rank]}${SUIT_SYMBOL[suit]}`;
+    (hand.trump === suit ? ' trump' : '');
+  b.innerHTML = shortLabel(id);
   const pts = cardPoints(id);
   if (info && pts !== null) b.innerHTML += `<small>${pts} pt${pts > 1 ? 's' : ''}</small>`;
-  const alt = info?.sure === false && info.alts?.find((a) => !state.cards.has(a.card));
+  const alt = info?.sure === false && info.alts?.find((a) => !hand.cards.has(a.card));
   if (alt) b.innerHTML += `<span class="alt">ou ${shortLabel(alt.card)} ?</span>`;
   b.disabled = disabled;
   if (onClick) b.onclick = onClick;
@@ -180,15 +407,13 @@ function cardButton(id, { onClick, disabled = false, info } = {}) {
 }
 
 function renderCards() {
-  const show = state.image || state.cards.size;
-  $('cardsPanel').hidden = !show;
-  $('cardCount').textContent = `${state.cards.size}`;
+  $('cardsPanel').hidden = hand.mode !== 'photo' || !(hand.image || hand.cards.size);
+  $('cardCount').textContent = `${hand.cards.size}`;
   const list = $('cardList');
   list.innerHTML = '';
-  // l'atout en premier
-  const order = state.trump ? [state.trump, ...SUITS.filter((s) => s !== state.trump)] : SUITS;
+  const order = hand.trump ? [hand.trump, ...SUITS.filter((s) => s !== hand.trump)] : SUITS;
   for (const s of order) {
-    const ids = RANKS.map((r) => r + s).filter((id) => state.cards.has(id));
+    const ids = RANKS.map((r) => r + s).filter((id) => hand.cards.has(id));
     if (!ids.length) continue;
     const row = document.createElement('div');
     row.className = 'suit-row';
@@ -196,7 +421,7 @@ function renderCards() {
     let sum = 0;
     for (const id of ids) {
       sum += cardPoints(id) ?? 0;
-      row.appendChild(cardButton(id, { info: state.cards.get(id), onClick: () => openCardMenu(id) }));
+      row.appendChild(cardButton(id, { info: hand.cards.get(id), onClick: () => openCardMenu(id) }));
     }
     const t = document.createElement('span');
     t.className = 'sum';
@@ -206,13 +431,8 @@ function renderCards() {
   }
 }
 
-function shortLabel(id) {
-  const { rank, suit } = parseCard(id);
-  return RANK_SHORT[rank] + SUIT_SYMBOL[suit];
-}
-
 function openCardMenu(id) {
-  const info = state.cards.get(id);
+  const info = hand.cards.get(id);
   const { rank, suit } = parseCard(id);
   $('cardMenuTitle').textContent = `${RANK_NAME[rank]} de ${SUIT_NAME[suit].toLowerCase()}`;
   $('cardMenuInfo').textContent = info.score < 1 ? `Confiance du détecteur : ${Math.round(info.score * 100)} %` : 'Ajoutée à la main';
@@ -220,25 +440,26 @@ function openCardMenu(id) {
   box.innerHTML = '';
   const action = (label, fn, primary = false) => {
     const b = document.createElement('button');
+    b.type = 'button';
     b.textContent = label;
     if (primary) b.className = 'primary';
     b.onclick = () => {
       fn();
       $('cardMenu').close();
       drawPreview();
-      render();
+      renderHand();
     };
     box.appendChild(b);
   };
   if (!info.sure) action(`C'est bien ${shortLabel(id)}`, () => { info.sure = true; }, true);
-  for (const a of (info.alts ?? []).filter((x) => !state.cards.has(x.card))) {
+  for (const a of (info.alts ?? []).filter((x) => !hand.cards.has(x.card))) {
     action(`Remplacer par ${shortLabel(a.card)}`, () => {
-      state.cards.delete(id);
-      state.cards.set(a.card, { score: a.score, sure: true, alts: [] });
-      for (const d of state.detections) if (d.card === id) d.card = a.card;
+      hand.cards.delete(id);
+      hand.cards.set(a.card, { score: a.score, sure: true, alts: [] });
+      for (const d of hand.detections) if (d.card === id) d.card = a.card;
     });
   }
-  action('Retirer cette carte', () => state.cards.delete(id));
+  action('Retirer cette carte', () => hand.cards.delete(id));
   action('Annuler', () => {});
   $('cardMenu').showModal();
 }
@@ -250,11 +471,11 @@ function openPicker() {
     for (const r of RANKS) {
       const id = r + s;
       grid.appendChild(cardButton(id, {
-        disabled: state.cards.has(id),
+        disabled: hand.cards.has(id),
         onClick: () => {
-          state.cards.set(id, { score: 1, sure: true, alts: [] });
+          hand.cards.set(id, { score: 1, sure: true, alts: [] });
           $('picker').close();
-          render();
+          renderHand();
         },
       }));
     }
@@ -262,67 +483,139 @@ function openPicker() {
   $('picker').showModal();
 }
 
-const OUTCOME = { dedans: 'Dedans !', litige: 'Litige' };
+function renderManual() {
+  const total = game().type === 'belote' ? BELOTE_HAND_TOTAL : MANILLE_TOTAL;
+  const t = hand.manualTeam;
+  $('manualInput').max = total;
+  $('manualHint').textContent = game().type === 'belote' ? `/ ${total} (10 de der compris)` : `/ ${total}`;
+  const v = Number(hand.manualValue);
+  $('manualOther').textContent = hand.manualValue !== '' && v >= 0 && v <= total
+    ? `${teamName(other(t))} : ${total - v} points`
+    : '';
+}
 
-function renderResult() {
+function renderResult(r) {
   const el = $('result');
-  const cards = [...state.cards.keys()];
-  if (!state.trump && state.game === 'belote') {
-    el.innerHTML = '<p class="hint">Choisissez l’atout pour calculer les points.</p>';
+  if (r.error) {
+    el.innerHTML = `<p class="hint">${r.error}</p>`;
     return;
   }
-  if (state.game === 'belote') {
-    const r = scoreBelote({
-      trump: state.trump, cards, lastTrick: state.der, announcements: state.announcements,
-      belote: state.belote, taker: state.taker,
-    });
-    const team = (k, name) => {
-      const bits = [`cartes ${r.capot ? (r.capot === k ? 250 : 0) : r.cardPoints[k]}`];
-      if (!r.capot && r.lastTrick === k) bits.push('der 10');
+  const names = { us: escapeHtml(teamName('us')), them: escapeHtml(teamName('them')) };
+  if (r.game === 'belote') {
+    const team = (k) => {
+      const bits = [];
+      if (r.capot) bits.push(r.capot === k ? 'capot 250' : 'capot 0');
+      else if (r.mode === 'manual') bits.push(`points ${r.base[k]}`);
+      else {
+        bits.push(`cartes ${r.cardPoints[k]}`);
+        if (r.lastTrick === k) bits.push('der 10');
+      }
       if (r.announcements[k]) bits.push(`annonces ${r.announcements[k]}`);
       if (r.belote[k]) bits.push('belote 20');
-      return `<div class="team"><div>${name}</div><div class="big">${r.score[k]}</div>
+      return `<div class="team"><div>${names[k]}</div><div class="big">${r.score[k]}</div>
         <div class="raw">${r.final[k]} pts</div><div class="detail">${bits.join(' + ')}</div></div>`;
     };
+    const badges = [r.capot ? '<span class="badge">Capot</span>' : '',
+      OUTCOME[r.outcome] ? `<span class="badge">${OUTCOME[r.outcome]}${r.outcome === 'dedans' ? ' !' : ''}</span>` : ''].join(' ');
+    const litige = r.outcome === 'litige'
+      ? `<div class="warn">Litige : ${r.reserved} points de ${names[r.taker]} mis en réserve pour le gagnant de la donne suivante.</div>` : '';
     el.innerHTML = `
-      <div class="row-between"><h2>Résultat</h2>${r.capot ? '<span class="badge">Capot</span>' : ''}
-        ${OUTCOME[r.outcome] ? `<span class="badge">${OUTCOME[r.outcome]}</span>` : ''}</div>
-      <div class="teams">${team('us', 'Nous')}${team('them', 'Eux')}</div>
+      <div class="row-between"><h2>Résultat de la donne</h2><div>${badges}</div></div>
+      <div class="teams">${team('us')}${team('them')}</div>${litige}
       ${r.warnings.map((w) => `<div class="warn">${w.message}</div>`).join('')}`;
   } else {
-    const r = scoreManille({ cards, trump: state.trump || null, multiplier: state.mult });
-    const team = (k, name) => `<div class="team"><div>${name}</div><div class="big">${r.score[k]}</div>
+    const team = (k) => `<div class="team"><div>${names[k]}</div><div class="big">${r.score[k]}</div>
       <div class="raw">${r.raw[k]} pts sur 60</div></div>`;
-    el.innerHTML = `<h2>Résultat</h2><div class="teams">${team('us', 'Nous')}${team('them', 'Eux')}</div>
+    el.innerHTML = `<h2>Résultat de la donne</h2><div class="teams">${team('us')}${team('them')}</div>
       ${r.warnings.map((w) => `<div class="warn">${w.message}</div>`).join('')}`;
   }
 }
 
-function render() {
-  $('beloteOptions').hidden = state.game !== 'belote';
-  $('manilleOptions').hidden = state.game !== 'manille';
+function renderHand() {
+  const isBelote = game().type === 'belote';
+  if (!isBelote && hand.mode === 'capot') hand.mode = 'photo';
+  setSeg('mode', hand.mode);
+  $('modeCapot').hidden = !isBelote;
+  $('trumpPanel').hidden = hand.mode !== 'photo';
+  $('photoPanel').hidden = hand.mode !== 'photo';
+  $('manualPanel').hidden = hand.mode !== 'manual';
+  $('capotPanel').hidden = hand.mode !== 'capot';
+  $('beloteOptions').hidden = !isBelote;
+  $('manilleOptions').hidden = isBelote;
+  $('derRow').hidden = hand.mode !== 'photo';
+  setSeg('photoTeam', hand.photoTeam);
+  setSeg('manualTeam', hand.manualTeam);
+  setSeg('capotTeam', hand.capotTeam);
+  setSeg('der', hand.der);
+  setSeg('belote', hand.belote ?? '');
+  setSeg('taker', hand.taker ?? '');
+  setSeg('mult', hand.mult);
   renderAnnouncements();
   renderCards();
-  renderResult();
+  renderManual();
+  const r = computeHand();
+  renderResult(r);
+  const blocking = r.error || r.warnings?.some((w) => w.code === 'manual');
+  $('saveHand').disabled = !!blocking;
+  $('saveHand').textContent = blocking ? 'Valider la donne' : `Valider : ${r.score.us} – ${r.score.them}`;
+}
+
+function saveHand() {
+  const r = computeHand();
+  if (r.error) return;
+  const soft = r.warnings?.filter((w) => w.code !== 'manual') ?? [];
+  if (soft.length && !confirm(`${soft.map((w) => w.message).join('\n')}\n\nValider quand même ?`)) return;
+  store.game = addHand(game(), handFromResult(r, { cards: hand.mode === 'photo' ? [...hand.cards.keys()] : undefined }));
+  saveStore();
+  hand = freshHand();
+  showView('game');
+}
+
+// ---------------------------------------------------------------------------
+// Navigation
+// ---------------------------------------------------------------------------
+
+function showView(v) {
+  $('viewGame').hidden = v !== 'game';
+  $('viewHand').hidden = v !== 'hand';
+  $('newGameBtn').hidden = v !== 'game';
+  renderTeamLabels();
+  if (v === 'game') renderGame();
+  else {
+    $('subtitle').textContent = `Donne ${game().hands.length + 1} · ${GAME_TYPES[game().type].label}`;
+    renderTrump();
+    renderHand();
+  }
+  window.scrollTo(0, 0);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 // ---------------------------------------------------------------------------
 
-bindSeg('game', (v) => {
-  state.game = v;
-  if (v === 'belote' && state.trump === '') state.trump = null;
-  renderTrump();
-  render();
-});
-bindSeg('der', (v) => { state.der = v; render(); });
-bindSeg('belote', (v) => { state.belote = v || null; render(); });
-bindSeg('taker', (v) => { state.taker = v || null; render(); });
-bindSeg('mult', (v) => { state.mult = Number(v); render(); });
+bindSeg('mode', (v) => { hand.mode = v; renderHand(); });
+bindSeg('photoTeam', (v) => { hand.photoTeam = v; renderHand(); });
+bindSeg('manualTeam', (v) => { hand.manualTeam = v; renderHand(); });
+bindSeg('capotTeam', (v) => { hand.capotTeam = v; renderHand(); });
+bindSeg('der', (v) => { hand.der = v; renderHand(); });
+bindSeg('belote', (v) => { hand.belote = v || null; renderHand(); });
+bindSeg('taker', (v) => { hand.taker = v || null; renderHand(); });
+bindSeg('mult', (v) => { hand.mult = Number(v); renderHand(); });
+$('manualInput').addEventListener('input', (e) => { hand.manualValue = e.target.value.trim(); renderHand(); });
 $('photo').addEventListener('change', (e) => onPhoto(e.target.files[0]));
 $('addCard').addEventListener('click', openPicker);
+$('newHandBtn').addEventListener('click', () => { hand = freshHand(); $('manualInput').value = ''; setStatus(''); showView('hand'); });
+$('cancelHand').addEventListener('click', () => {
+  if ((hand.cards.size || hand.manualValue) && !confirm('Abandonner la saisie de cette donne ?')) return;
+  hand = freshHand();
+  showView('game');
+});
+$('saveHand').addEventListener('click', saveHand);
+$('newGameBtn').addEventListener('click', openNewGameDialog);
 fillAnnouncementSelects();
-renderTrump();
-render();
+showView('game');
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js');

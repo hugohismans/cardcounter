@@ -74,9 +74,16 @@ export function checkCards(cards) {
 /**
  * Score d'une donne de belote.
  *
+ * Trois façons de donner les points de la donne :
+ *  - `cards` : cartes des plis de "nous" (photo), + `lastTrick` pour le 10 de der ;
+ *  - `manualPoints` : points de "nous" comptés à la main, sur 162 (10 de der compris) ;
+ *  - `capot` : 'us' | 'them', l'équipe qui a fait tous les plis (250 points).
+ *
  * @param {object} p
- * @param {string} p.trump            couleur d'atout : 'S' | 'H' | 'D' | 'C'
- * @param {string[]} p.cards          cartes des plis de l'équipe photographiée ("us")
+ * @param {string} [p.trump]          couleur d'atout : 'S' | 'H' | 'D' | 'C' (requis avec `cards`)
+ * @param {string[]} [p.cards]        cartes des plis de l'équipe photographiée ("us")
+ * @param {number} [p.manualPoints]   points de "nous" sur 162, der compris
+ * @param {'us'|'them'} [p.capot]     capot saisi directement
  * @param {'us'|'them'} p.lastTrick   équipe qui a fait le dernier pli (10 de der)
  * @param {{us?: string[], them?: string[]}} [p.announcements] annonces (clés de ANNOUNCEMENTS)
  * @param {'us'|'them'|null} [p.belote]  équipe qui a annoncé belote-rebelote
@@ -84,35 +91,55 @@ export function checkCards(cards) {
  * @param {'half-up'|'half-down'} [p.rounding]
  */
 export function scoreBelote({
-  trump,
-  cards,
-  lastTrick,
+  trump = null,
+  cards = null,
+  manualPoints = null,
+  capot: forcedCapot = null,
+  lastTrick = null,
   announcements = {},
   belote = null,
   taker = null,
   rounding = 'half-up',
 }) {
-  const warnings = checkCards(cards);
-  const unique = [...new Set(cards)];
-
-  const detail = unique.map((id) => ({ id, points: beloteCardValue(id, trump) }));
-  const usCards = detail.reduce((a, c) => a + c.points, 0);
-
-  let capot = null;
-  if (unique.length === 32) capot = 'us';
-  else if (unique.length === 0) capot = 'them';
-
-  if (!capot && lastTrick !== 'us' && lastTrick !== 'them') {
-    warnings.push({ code: 'der', message: 'Indiquer quelle équipe a fait le dernier pli (10 de der).' });
-  }
-
-  // Points de cartes + 10 de der, ou 250 pour un capot.
+  let warnings = [];
+  let detail = [];
+  let usCards = null;
+  let capot = forcedCapot;
   const base = { us: 0, them: 0 };
-  if (capot) {
-    base[capot] = CAPOT_POINTS;
+  let mode;
+
+  if (forcedCapot) {
+    mode = 'capot';
+  } else if (manualPoints !== null && manualPoints !== undefined) {
+    mode = 'manual';
+    const v = Math.round(Number(manualPoints));
+    if (!Number.isFinite(v) || v < 0 || v > BELOTE_HAND_TOTAL) {
+      warnings.push({ code: 'manual', message: `Les points doivent être entre 0 et ${BELOTE_HAND_TOTAL}.` });
+    }
+    base.us = Math.min(BELOTE_HAND_TOTAL, Math.max(0, v || 0));
+    base.them = BELOTE_HAND_TOTAL - base.us;
   } else {
-    base.us = usCards + (lastTrick === 'us' ? DIX_DE_DER : 0);
-    base.them = BELOTE_CARD_TOTAL - usCards + (lastTrick === 'them' ? DIX_DE_DER : 0);
+    mode = 'cards';
+    cards = cards ?? [];
+    warnings = checkCards(cards);
+    const unique = [...new Set(cards)];
+    detail = unique.map((id) => ({ id, points: beloteCardValue(id, trump) }));
+    usCards = detail.reduce((a, c) => a + c.points, 0);
+    if (unique.length === 32) capot = 'us';
+    else if (unique.length === 0) capot = 'them';
+    if (!capot) {
+      if (lastTrick !== 'us' && lastTrick !== 'them') {
+        warnings.push({ code: 'der', message: 'Indiquer quelle équipe a fait le dernier pli (10 de der).' });
+      }
+      base.us = usCards + (lastTrick === 'us' ? DIX_DE_DER : 0);
+      base.them = BELOTE_CARD_TOTAL - usCards + (lastTrick === 'them' ? DIX_DE_DER : 0);
+    }
+  }
+  // Capot : 250 points (10 de der compris) pour l'équipe qui a tous les plis.
+  if (capot) {
+    base.us = 0;
+    base.them = 0;
+    base[capot] = CAPOT_POINTS;
   }
 
   const ann = {
@@ -134,6 +161,7 @@ export function scoreBelote({
 
   // Contrat : le preneur doit faire plus que la défense, sinon il est "dedans".
   let outcome = 'made';
+  let reserved = 0;
   let final = { ...raw };
   if (taker) {
     const def = other(taker);
@@ -148,6 +176,7 @@ export function scoreBelote({
       // Litige : la défense marque ses points, ceux du preneur sont mis en
       // réserve et iront à l'équipe qui gagne la donne suivante.
       outcome = 'litige';
+      reserved = raw[taker];
       final = { us: 0, them: 0 };
       final[def] = raw[def];
     }
@@ -155,10 +184,13 @@ export function scoreBelote({
 
   return {
     game: 'belote',
+    mode,
     trump,
+    taker,
     cards: detail,
-    cardCount: unique.length,
-    cardPoints: { us: usCards, them: BELOTE_CARD_TOTAL - usCards },
+    cardCount: detail.length,
+    cardPoints: usCards === null ? null : { us: usCards, them: BELOTE_CARD_TOTAL - usCards },
+    base,
     capot,
     lastTrick,
     announcements: ann,
@@ -167,6 +199,8 @@ export function scoreBelote({
     outcome,
     final,
     score: { us: toGamePoints(final.us, rounding), them: toGamePoints(final.them, rounding) },
+    // litige : points du preneur mis en réserve (en points de partie), pour le gagnant de la donne suivante
+    reserved: toGamePoints(reserved, rounding),
     warnings,
   };
 }
@@ -187,15 +221,29 @@ export const MANILLE_HALF = 30;
  * @param {string|null} [p.trump] atout (sans effet sur la valeur des cartes, gardé pour le récap)
  * @param {number} [p.multiplier] multiplicateur (sans atout, contré, ...)
  */
-export function scoreManille({ cards, trump = null, multiplier = 1 }) {
-  const warnings = checkCards(cards);
-  const unique = [...new Set(cards)];
-  const detail = unique.map((id) => ({ id, points: MANILLE_VALUES[parseCard(id).rank] }));
-  const us = detail.reduce((a, c) => a + c.points, 0);
+export function scoreManille({ cards = null, manualPoints = null, trump = null, multiplier = 1 }) {
+  let warnings = [];
+  let detail = [];
+  let us;
+  let mode;
+  if (manualPoints !== null && manualPoints !== undefined) {
+    mode = 'manual';
+    const v = Math.round(Number(manualPoints));
+    if (!Number.isFinite(v) || v < 0 || v > MANILLE_TOTAL) {
+      warnings.push({ code: 'manual', message: `Les points doivent être entre 0 et ${MANILLE_TOTAL}.` });
+    }
+    us = Math.min(MANILLE_TOTAL, Math.max(0, v || 0));
+  } else {
+    mode = 'cards';
+    cards = cards ?? [];
+    warnings = checkCards(cards);
+    detail = [...new Set(cards)].map((id) => ({ id, points: MANILLE_VALUES[parseCard(id).rank] }));
+    us = detail.reduce((a, c) => a + c.points, 0);
+  }
   const raw = { us, them: MANILLE_TOTAL - us };
   const score = {
     us: Math.max(0, raw.us - MANILLE_HALF) * multiplier,
     them: Math.max(0, raw.them - MANILLE_HALF) * multiplier,
   };
-  return { game: 'manille', trump, cards: detail, cardCount: unique.length, raw, multiplier, score, warnings };
+  return { game: 'manille', mode, trump, cards: detail, cardCount: detail.length, raw, multiplier, score, warnings };
 }

@@ -26,6 +26,7 @@
   }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   margin: 0;
   font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -111,3 +112,60 @@ dialog::backdrop { background: rgb(0 0 0 / .4); }
 .menu button { font: inherit; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
 .menu button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
 .c .alt { display: block; font-size: 10px; color: var(--warn); font-weight: 600; }
+
+/* ---- en-tête ---- */
+header .sub { font-size: 12px; opacity: .85; }
+.hbtn { background: transparent; color: inherit; border: 1px solid currentColor; border-radius: 10px; padding: 6px 10px; font: inherit; font-size: 14px; white-space: nowrap; }
+.view { display: grid; gap: 12px; }
+.view[hidden] { display: none; }
+.center { text-align: center; }
+
+/* ---- tableau de score ---- */
+.board { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.score-team { background: var(--bg); border-radius: 12px; padding: 12px; text-align: center; border: 2px solid transparent; }
+.score-team.lead { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.score-team.won { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--bg)); }
+.score-team .tn { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.score-team .total { font-size: 44px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.bar { height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; margin: 6px 0 4px; }
+.bar span { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.winner { text-align: center; font-size: 18px; padding: 8px 0 12px; }
+.big-btn { font: inherit; font-size: 18px; font-weight: 700; padding: 16px; border-radius: var(--radius); border: 0; background: var(--accent); color: var(--accent-ink); }
+.big-btn:disabled { opacity: .5; }
+
+/* ---- liste des donnes ---- */
+.hand-row, .hand-head {
+  display: grid; grid-template-columns: 28px 1fr 44px 44px 72px; align-items: center; gap: 6px;
+  width: 100%; padding: 9px 2px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--ink); font: inherit; text-align: left;
+}
+.hand-head { border-top: 0; color: var(--muted); font-size: 12px; padding-top: 0; }
+.hand-head span, .hand-row .pts { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hand-row .n { color: var(--muted); font-size: 13px; }
+.hand-row .meta { font-size: 13px; display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.hand-row .meta .red { color: var(--red); }
+.hand-row .pts { font-weight: 700; font-variant-numeric: tabular-nums; }
+.hand-row .cum { text-align: right; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.plus { color: var(--accent); font-weight: 600; }
+.badge.soft { background: var(--line); color: var(--ink); font-weight: 500; }
+
+/* ---- saisie ---- */
+.seg.wide { display: flex; width: 100%; }
+.seg.wide button { flex: 1; padding: 9px 4px; }
+.manual { display: flex; align-items: baseline; gap: 10px; margin: 8px 0 4px; }
+.manual input { width: 120px; font-size: 32px; font-weight: 700; padding: 6px 10px; border-radius: 10px; border: 2px solid var(--line); background: var(--panel); color: var(--ink); }
+.manual input:focus { outline: none; border-color: var(--accent); }
+.manual span { color: var(--muted); }
+.footer-bar {
+  position: sticky; bottom: 0; display: grid; grid-template-columns: 1fr 2fr; gap: 10px;
+  padding: 10px 0 calc(10px + env(safe-area-inset-bottom)); background: var(--bg);
+}
+.footer-bar button { font: inherit; font-weight: 600; padding: 14px; border-radius: 12px; border: 1px solid var(--line); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.primary:disabled { opacity: .45; }
+button.ghost { background: var(--panel); color: var(--ink); }
+button.danger { color: var(--red); }
+
+/* ---- formulaires (dialogues) ---- */
+.field { display: grid; gap: 4px; margin: 10px 0; font-size: 14px; color: var(--muted); }
+.field input { font: inherit; font-size: 16px; color: var(--ink); padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); }
+.edit-scores { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
