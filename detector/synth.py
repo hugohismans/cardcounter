@@ -114,7 +114,17 @@ def _smooth_noise(rng, h, w, cells):
 
 
 def background(rng, h, w) -> np.ndarray:
-    kind = rng.integers(0, 6)
+    kind = rng.integers(0, 8)
+    if kind >= 6:  # intérieur flou (photo de cartes tenues en main) : grands aplats + gros flou
+        img = np.ones((h, w, 3), np.float32) * (0.4 + 0.5 * rng.random(3)).astype(np.float32)
+        for _ in range(int(rng.integers(3, 12))):
+            col = (rng.random(3) * rng.uniform(0.2, 1.0)).astype(np.float32)
+            x0, y0 = int(rng.integers(-w // 4, w)), int(rng.integers(-h // 4, h))
+            cv2.rectangle(img, (x0, y0), (x0 + int(rng.integers(w // 10, w)), y0 + int(rng.integers(h // 10, h))),
+                          tuple(float(c) for c in col), -1)
+        k = int(rng.integers(5, 25)) * 2 + 1
+        img = cv2.GaussianBlur(img, (k, k), 0)
+        return np.clip(img + rng.normal(0, 0.01, (h, w, 1)).astype(np.float32), 0, 1)
     c1 = rng.random(3).astype(np.float32)
     c2 = rng.random(3).astype(np.float32)
     if kind == 0:  # uni + bruit
@@ -292,6 +302,13 @@ def make_scene(rng, decks: list[Deck], W: int, H: int):
 
     canvas = background(rng, H, W)
     region_map = np.full((H, W), -1, np.float32)
+    hand = None
+    if rng.random() < 0.45:
+        pts = np.concatenate([_apply_affine_pts(M, [[0, 0], [deck.cards[c][0].shape[1], 0],
+                                                    [deck.cards[c][0].shape[1], deck.cards[c][0].shape[0]],
+                                                    [0, deck.cards[c][0].shape[0]]]) for c, M in zip(chosen, full)])
+        hand = hand_params(rng, pts)
+        draw_hand(hand, canvas, region_map, "palm")
     regions = []  # (classe, polygone dans le canvas)
     sh_dx, sh_dy = rng.normal(0, 4, 2)
     sh_blur = int(rng.integers(1, 6)) * 2 + 1
@@ -334,6 +351,9 @@ def make_scene(rng, decks: list[Deck], W: int, H: int):
             regions.append((CLASS_INDEX[cid], poly))
             rm[(m > 0) & card_mask] = rid
 
+    if hand:
+        draw_hand(hand, canvas, region_map, "thumb")
+
     # perspective (photo prise de biais)
     j = rng.uniform(0, 0.12)
     src = np.float32([[0, 0], [W, 0], [W, H], [0, H]])
@@ -364,6 +384,48 @@ def make_scene(rng, decks: list[Deck], W: int, H: int):
 
     canvas = photometric(rng, canvas)
     return (np.clip(canvas, 0, 1) * 255).astype(np.uint8), labels
+
+
+def hand_params(rng, card_pts):
+    mn, mx = card_pts.min(0), card_pts.max(0)
+    size = float(max(mx - mn)) + 1
+    skin = np.array([rng.uniform(0.75, 0.98), rng.uniform(0.55, 0.78), rng.uniform(0.45, 0.68)], np.float32)
+    skin *= rng.uniform(0.5, 1.1)
+    if rng.random() < 0.7:  # bas de l'éventail
+        base = np.array([rng.uniform(mn[0], mx[0]), mx[1] - rng.uniform(0, 0.25) * (mx[1] - mn[1])])
+    else:
+        base = card_pts[rng.integers(0, len(card_pts))] + rng.normal(0, 0.05 * size, 2)
+    return dict(
+        skin=skin, base=base, size=size,
+        palm_c=base + rng.normal(0, 0.05 * size, 2) + (0, rng.uniform(0.1, 0.3) * size),
+        palm_ax=(int(rng.uniform(0.15, 0.3) * size), int(rng.uniform(0.2, 0.35) * size)),
+        palm_ang=float(rng.uniform(-40, 40)),
+        thumb_ang=math.radians(rng.uniform(-150, -30)),
+        thumb_len=rng.uniform(0.15, 0.3) * size,
+        thumb_w=rng.uniform(0.035, 0.06) * size,
+        noise_seed=int(rng.integers(0, 2**31)),
+    )
+
+
+def draw_hand(hp, canvas, region_map, part):
+    """Main qui tient les cartes : la paume (part='palm') est dessinée AVANT les cartes,
+    le pouce (part='thumb') APRÈS, posé sur l'éventail."""
+    H, W = canvas.shape[:2]
+    m = np.zeros((H, W), np.float32)
+    if part == "palm":
+        c = hp["palm_c"]
+        cv2.ellipse(m, (int(c[0]), int(c[1])), hp["palm_ax"], hp["palm_ang"], 0, 360, 1.0, -1)
+        # avant-bras qui sort de l'image vers le bas
+        cv2.line(m, (int(c[0]), int(c[1])), (int(c[0] + 0.2 * hp["size"]), H + 50), 1.0, int(hp["palm_ax"][0] * 1.4))
+    else:
+        b = hp["base"]
+        tip = b + np.array([math.cos(hp["thumb_ang"]), math.sin(hp["thumb_ang"])]) * hp["thumb_len"]
+        cv2.line(m, (int(b[0]), int(b[1])), (int(tip[0]), int(tip[1])), 1.0, max(2, int(2 * hp["thumb_w"])))
+        cv2.circle(m, (int(tip[0]), int(tip[1])), max(1, int(hp["thumb_w"])), 1.0, -1)
+    m = cv2.GaussianBlur(m, (5, 5), 0)
+    shade = 0.75 + 0.35 * _smooth_noise(np.random.default_rng(hp["noise_seed"]), H, W, 3)
+    canvas[:] = canvas * (1 - m[..., None]) + (hp["skin"] * shade[..., None]) * m[..., None]
+    region_map[m > 0.5] = -1
 
 
 def photometric(rng, img):

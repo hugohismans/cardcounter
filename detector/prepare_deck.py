@@ -36,10 +36,14 @@ def find_cards(img: np.ndarray, expected: int | None = None) -> list[np.ndarray]
     area_img = img.shape[0] * img.shape[1]
     best = []
     # cartes claires sur fond sombre (Otsu), sinon contours (Canny)
-    _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    otsu, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # seuils plus hauts : seul le blanc des cartes reste (table éclairée, reflets)
+    white = [((gray > t) * 255).astype(np.uint8) for t in (otsu + (255 - otsu) * f for f in (0.35, 0.55))]
     edges = cv2.dilate(cv2.Canny(gray, 40, 120), np.ones((5, 5), np.uint8))
-    for mask in (th, 255 - th, edges):
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    k = max(5, int(0.012 * max(img.shape[:2])))  # sépare les cartes presque collées
+    candidates = [cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((ks, ks), np.uint8))
+                  for m in (th, *white, 255 - th, edges) for ks in (5, k)]
+    for mask in candidates:
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         quads = []
         for c in contours:
