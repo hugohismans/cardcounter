@@ -122,3 +122,9 @@ test('manille : un roulé compte double', () => {
   const r = scoreManille({ manualPoints: 38, multiplier: 2 });
   assert.deepEqual(r.score, { us: 16, them: 0 });
 });
+
+test('manille : buké double encore (roulé buké = ×4)', () => {
+  assert.deepEqual(scoreManille({ manualPoints: 38, multiplier: 2 }).score, { us: 16, them: 0 }); // buké seul
+  assert.deepEqual(scoreManille({ manualPoints: 38, multiplier: 4 }).score, { us: 32, them: 0 }); // roulé + buké
+  assert.deepEqual(scoreManille({ manualPoints: 20, multiplier: 4 }).score, { us: 0, them: 40 });
+});

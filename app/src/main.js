@@ -42,6 +42,7 @@ function freshHand() {
     belote: null,
     taker: null,
     announcements: { us: [], them: [] },
+    buke: false,
     image: null,
     detections: [],
   };
@@ -121,7 +122,8 @@ function computeHand() {
   } else {
     r = scoreManille({
       trump: h.trump || null,
-      multiplier: h.trump === '' ? 2 : 1, // roulé (sans atout) : compte double
+      // roulé (sans atout) : ×2 ; buké : ×2 encore (roulé buké = ×4)
+      multiplier: (h.trump === '' ? 2 : 1) * (h.buke ? 2 : 1),
       cards: h.mode === 'photo' ? [...h.cards.keys()] : null,
       manualPoints: h.mode === 'manual' ? Number(h.manualValue) : null,
     });
@@ -217,6 +219,7 @@ function renderGame() {
     if (h.capot) badges.push(`<span class="badge">Capot ${escapeHtml(teamName(h.capot))}</span>`);
     if (OUTCOME[h.outcome]) badges.push(`<span class="badge">${OUTCOME[h.outcome]}</span>`);
     if (h.roule) badges.push('<span class="badge roule">Roulé ×2</span>');
+    if (h.buke) badges.push('<span class="badge roule">Buké ×2</span>');
     if (h.edited) badges.push('<span class="badge soft">modifiée</span>');
     const bonus = (k) => (row.bonus[k] ? ` <small class="plus">+${row.bonus[k]}</small>` : '');
     const trump = h.trump ? `<span class="${RED.has(h.trump) ? 'red' : ''}">${SUIT_SYMBOL[h.trump]}</span>` : '';
@@ -589,7 +592,10 @@ function renderResult(r) {
   } else {
     const team = (k) => `<div class="team"><div>${names[k]}</div><div class="big">${r.score[k]}</div>
       <div class="raw">${r.raw[k]} pts sur 60</div></div>`;
-    el.innerHTML = `<h2>Résultat de la donne</h2><div class="teams">${team('us')}${team('them')}</div>
+    const why = [hand.trump === '' ? 'roulé' : '', hand.buke ? 'buké' : ''].filter(Boolean).join(' + ');
+    const mult = r.multiplier > 1 ? `<span class="badge">×${r.multiplier} (${why})</span>` : '';
+    el.innerHTML = `<div class="row-between"><h2>Résultat de la donne</h2>${mult}</div>
+      <div class="teams">${team('us')}${team('them')}</div>
       ${r.warnings.map((w) => `<div class="warn">${w.message}</div>`).join('')}`;
   }
 }
@@ -611,6 +617,8 @@ function renderHand() {
   setSeg('der', hand.der);
   setSeg('belote', hand.belote ?? '');
   setSeg('taker', hand.taker ?? '');
+  $('bukeRow').hidden = isBelote;
+  setSeg('buke', hand.buke ? '1' : '');
   renderAnnouncements();
   renderCards();
   renderManual();
@@ -629,6 +637,7 @@ function saveHand() {
   store.game = addHand(game(), handFromResult(r, {
     cards: hand.mode === 'photo' ? [...hand.cards.keys()] : undefined,
     roule: game().type === 'manille' && hand.trump === '',
+    buke: game().type === 'manille' && hand.buke,
   }));
   saveStore();
   hand = freshHand();
@@ -667,6 +676,7 @@ bindSeg('capotTeam', (v) => { hand.capotTeam = v; renderHand(); });
 bindSeg('der', (v) => { hand.der = v; renderHand(); });
 bindSeg('belote', (v) => { hand.belote = v || null; renderHand(); });
 bindSeg('taker', (v) => { hand.taker = v || null; renderHand(); });
+bindSeg('buke', (v) => { hand.buke = v === '1'; renderHand(); });
 $('manualInput').addEventListener('input', (e) => { hand.manualValue = e.target.value.trim(); renderHand(); });
 $('photo').addEventListener('change', (e) => onPhoto(e.target.files[0]));
 $('addCard').addEventListener('click', openPicker);
