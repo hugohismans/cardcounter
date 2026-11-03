@@ -3,6 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "node scripts/vendor.mjs",
+    "vendor": "node scripts/vendor.mjs",
+    "serve": "python3 -m http.server 8080",
     "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "onnxruntime-web": "1.31.1"
   }
 }

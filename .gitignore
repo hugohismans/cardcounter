@@ -6,3 +6,5 @@ detector/assets/decks/svgcards/
 detector/assets/face_art/
 *.pt
 *.log
+app/node_modules/
+app/vendor/

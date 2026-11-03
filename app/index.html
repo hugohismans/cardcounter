@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f5132">
+  <title>Compteur de points</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Compteur de points</h1>
+    <div class="seg" id="game">
+      <button data-v="belote" class="on">Belote</button>
+      <button data-v="manille">Manille</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="card-panel">
+      <h2>Atout</h2>
+      <div class="suits" id="trump"></div>
+    </section>
+
+    <section class="card-panel">
+      <label class="shot">
+        <input type="file" id="photo" accept="image/*" capture="environment" hidden>
+        <span>📷 Photographier nos plis</span>
+      </label>
+      <p class="hint">Étalez les plis d'<b>une seule équipe</b> en éventail, coins visibles, et prenez la photo du dessus.</p>
+      <div id="status" class="status" hidden></div>
+      <div class="photo-wrap" id="photoWrap" hidden><canvas id="preview"></canvas></div>
+    </section>
+
+    <section class="card-panel" id="cardsPanel" hidden>
+      <div class="row-between">
+        <h2>Cartes reconnues <span id="cardCount" class="pill"></span></h2>
+        <button class="link" id="addCard">+ Ajouter</button>
+      </div>
+      <p class="hint">Touchez une carte pour la retirer. En orange : à vérifier.</p>
+      <div id="cardList"></div>
+    </section>
+
+    <section class="card-panel" id="beloteOptions">
+      <h2>Donne</h2>
+      <div class="opt">
+        <span>Dernier pli (10 de der)</span>
+        <div class="seg small" id="der"><button data-v="us" class="on">Nous</button><button data-v="them">Eux</button></div>
+      </div>
+      <div class="opt">
+        <span>Belote-rebelote</span>
+        <div class="seg small" id="belote"><button data-v="" class="on">—</button><button data-v="us">Nous</button><button data-v="them">Eux</button></div>
+      </div>
+      <div class="opt">
+        <span>Preneur</span>
+        <div class="seg small" id="taker"><button data-v="" class="on">—</button><button data-v="us">Nous</button><button data-v="them">Eux</button></div>
+      </div>
+      <h3>Annonces</h3>
+      <div class="ann">
+        <div><b>Nous</b><div class="chips" id="annUs"></div><select data-team="us" class="annAdd"></select></div>
+        <div><b>Eux</b><div class="chips" id="annThem"></div><select data-team="them" class="annAdd"></select></div>
+      </div>
+    </section>
+
+    <section class="card-panel" id="manilleOptions" hidden>
+      <h2>Donne</h2>
+      <div class="opt">
+        <span>Multiplicateur</span>
+        <div class="seg small" id="mult"><button data-v="1" class="on">×1</button><button data-v="2">×2</button><button data-v="4">×4</button></div>
+      </div>
+    </section>
+
+    <section class="card-panel result" id="result"></section>
+  </main>
+
+  <dialog id="picker">
+    <form method="dialog">
+      <h2>Ajouter une carte</h2>
+      <div id="pickerGrid"></div>
+      <button class="link" value="close">Fermer</button>
+    </form>
+  </dialog>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

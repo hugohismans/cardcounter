@@ -3,7 +3,7 @@
 Usage :
     python export.py runs/cards/weights/best.pt --imgsz 640
 
-Produit app/public/model/cards.onnx et app/public/model/meta.json.
+Produit app/model/cards.onnx et app/model/meta.json.
 """
 
 import argparse
@@ -16,7 +16,7 @@ from ultralytics import YOLO
 from cards import CLASSES
 
 ROOT = Path(__file__).parent
-OUT = ROOT.parent / "app" / "public" / "model"
+OUT = ROOT.parent / "app" / "model"
 
 
 def main():
