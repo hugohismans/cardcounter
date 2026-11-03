@@ -183,3 +183,11 @@ button.danger { color: var(--red); }
 .ios-share { display: inline-block; border: 1px solid var(--line); border-radius: 6px; padding: 0 5px; }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .brand img { border-radius: 8px; box-shadow: 0 0 0 1px rgb(255 255 255 / .25); }
+
+/* ---- manille : donneur / roulés ---- */
+.next-deal { margin: 0; text-align: center; font-size: 14px; color: var(--muted); }
+.next-deal b { color: var(--ink); }
+.forced, .badge.roule { color: #000; background: var(--warn); border-radius: 99px; padding: 1px 8px; font-weight: 600; }
+.badge.roule { font-size: 12px; }
+.suits button:disabled { opacity: .3; }
+#rouleWarn { margin-top: 10px; }

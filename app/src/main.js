@@ -3,7 +3,9 @@ import {
   scoreBelote, scoreManille, beloteCardValue, MANILLE_VALUES, ANNOUNCEMENTS, BELOTE_HAND_TOTAL, MANILLE_TOTAL,
 } from './scoring.js';
 import { CardDetector } from './detector.js';
-import { GAME_TYPES, newGame, handFromResult, computeGame, addHand, removeHand, editHandScore } from './game.js';
+import {
+  GAME_TYPES, newGame, handFromResult, computeGame, addHand, removeHand, editHandScore, isDealGame, dealerOf, rouleStatus,
+} from './game.js';
 
 const $ = (id) => document.getElementById(id);
 const RED = new Set(['H', 'D']);
@@ -40,7 +42,6 @@ function freshHand() {
     belote: null,
     taker: null,
     announcements: { us: [], them: [] },
-    mult: 1,
     image: null,
     detections: [],
   };
@@ -95,6 +96,7 @@ function computeHand() {
   const sw = (x) => (flip ? swapTeams(x) : x);
 
   if (h.mode === 'photo' && isBelote && !h.trump) return { error: 'Choisissez l’atout pour calculer les points.' };
+  if (!isBelote && h.trump === null) return { error: 'Choisissez l’atout, ou le roulé (sans atout, compte double).' };
   if (h.mode === 'manual' && h.manualValue === '') return { error: 'Saisissez les points comptés.' };
 
   let r;
@@ -119,7 +121,7 @@ function computeHand() {
   } else {
     r = scoreManille({
       trump: h.trump || null,
-      multiplier: h.mult,
+      multiplier: h.trump === '' ? 2 : 1, // roulé (sans atout) : compte double
       cards: h.mode === 'photo' ? [...h.cards.keys()] : null,
       manualPoints: h.mode === 'manual' ? Number(h.manualValue) : null,
     });
@@ -163,21 +165,40 @@ const MODE_ICON = { cards: '📷', manual: '✍️', capot: '🏆' };
 function renderGame() {
   const g = game();
   const res = computeGame(g);
-  $('subtitle').textContent = `${GAME_TYPES[g.type].label} · partie en ${g.target}`;
+  const deal = isDealGame(g);
+  const rs = deal ? rouleStatus(g) : null;
+  $('subtitle').textContent = deal
+    ? `${GAME_TYPES[g.type].label} · donne ${Math.min(g.hands.length + 1, g.deals)}/${g.deals}`
+    : `${GAME_TYPES[g.type].label} · partie en ${g.target}`;
 
   $('board').innerHTML = ['us', 'them'].map((k) => {
-    const pct = Math.min(100, (res.totals[k] / g.target) * 100);
     const lead = res.totals[k] > res.totals[other(k)];
+    let pct;
+    let hint;
+    if (deal) {
+      const t = rs.teams[k];
+      pct = g.roules ? Math.min(100, (t.done / g.roules) * 100) : 100;
+      hint = g.roules ? `roulés ${t.done}/${g.roules}${t.missing > t.dealsLeft ? ' ⚠️' : ''}` : '';
+    } else {
+      pct = Math.min(100, (res.totals[k] / g.target) * 100);
+      hint = `reste ${Math.max(0, g.target - res.totals[k])}`;
+    }
     return `<div class="score-team ${lead ? 'lead' : ''} ${res.winner === k ? 'won' : ''}">
       <div class="tn">${escapeHtml(teamName(k))}</div>
       <div class="total">${res.totals[k]}</div>
       <div class="bar"><span style="width:${pct}%"></span></div>
-      <div class="hint">reste ${Math.max(0, g.target - res.totals[k])}</div>
+      <div class="hint">${hint}</div>
     </div>`;
   }).join('');
 
   $('winner').hidden = !res.winner;
-  if (res.winner) $('winner').innerHTML = `🏆 <b>${escapeHtml(teamName(res.winner))}</b> gagne la partie !`;
+  if (res.winner === 'tie') $('winner').innerHTML = '🤝 <b>Égalité</b> à la fin de la partie !';
+  else if (res.winner) $('winner').innerHTML = `🏆 <b>${escapeHtml(teamName(res.winner))}</b> gagne la partie !`;
+  $('nextDeal').hidden = !deal || !!res.winner;
+  if (deal && !res.winner) {
+    $('nextDeal').innerHTML = `Donne ${rs.next + 1}/${g.deals} : <b>${escapeHtml(teamName(rs.nextDealer))}</b> distribue et choisit l'atout`
+      + (rs.forced ? ' — <span class="forced">roulé imposé</span>' : '');
+  }
   $('reserveNote').hidden = !res.reserve;
   $('reserveNote').textContent = `Litige : ${res.reserve} points en réserve pour le gagnant de la prochaine donne.`;
 
@@ -195,6 +216,7 @@ function renderGame() {
     const badges = [];
     if (h.capot) badges.push(`<span class="badge">Capot ${escapeHtml(teamName(h.capot))}</span>`);
     if (OUTCOME[h.outcome]) badges.push(`<span class="badge">${OUTCOME[h.outcome]}</span>`);
+    if (h.roule) badges.push('<span class="badge roule">Roulé ×2</span>');
     if (h.edited) badges.push('<span class="badge soft">modifiée</span>');
     const bonus = (k) => (row.bonus[k] ? ` <small class="plus">+${row.bonus[k]}</small>` : '');
     const trump = h.trump ? `<span class="${RED.has(h.trump) ? 'red' : ''}">${SUIT_SYMBOL[h.trump]}</span>` : '';
@@ -213,7 +235,8 @@ function renderGame() {
 
 function openHandDialog(index) {
   const h = game().hands[index];
-  $('handDialogTitle').textContent = `Donne ${index + 1}`;
+  const g = game();
+  $('handDialogTitle').textContent = `Donne ${index + 1}` + (isDealGame(g) ? ` · donneur : ${teamName(dealerOf(g, index))}` : '');
   const raw = h.raw ? ` — ${h.raw.us} / ${h.raw.them} points` : '';
   $('handDialogInfo').textContent = `Corrigez le score si besoin${raw}.`;
   $('editUs').value = h.score.us;
@@ -239,12 +262,33 @@ function openNewGameDialog() {
   setSeg('ngType', type);
   $('ngUs').value = g.teams.us === 'Nous' ? '' : g.teams.us;
   $('ngThem').value = g.teams.them === 'Eux' ? '' : g.teams.them;
+  let first = 'us';
+  setSeg('ngFirst', first);
+  const syncNames = () => {
+    $('ngFirst').querySelector('[data-v="us"]').textContent = $('ngUs').value.trim() || 'Nous';
+    $('ngFirst').querySelector('[data-v="them"]').textContent = $('ngThem').value.trim() || 'Eux';
+  };
+  syncNames();
+  $('ngUs').oninput = syncNames;
+  $('ngThem').oninput = syncNames;
+  $('ngFirst').onclick = (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    first = b.dataset.v;
+    setSeg('ngFirst', first);
+  };
   const setType = (t) => {
     type = t;
-    $('ngTarget').value = GAME_TYPES[t].target;
+    $('ngTargetField').hidden = t !== 'belote';
+    $('ngManilleFields').hidden = t !== 'manille';
+    if (t === 'belote') $('ngTarget').value = GAME_TYPES.belote.target;
+    else {
+      $('ngDeals').value = GAME_TYPES.manille.deals;
+      $('ngRoules').value = GAME_TYPES.manille.roules;
+    }
     $('ngHint').textContent = t === 'belote'
       ? 'Belote : scores comptés sur 10 (162 points = 16). 100 = partie en 1000 points.'
-      : 'Manille : chaque équipe marque ses points au-delà de 30.';
+      : 'Manille : chaque équipe marque ses points au-delà de 30. Celui qui distribue choisit l’atout ; un roulé (sans atout) compte double.';
   };
   setType(type);
   $('ngType').onclick = (e) => {
@@ -259,7 +303,14 @@ function openNewGameDialog() {
     if (game().hands.length) {
       store.archive = [{ ...game(), endedAt: new Date().toISOString() }, ...(store.archive ?? [])].slice(0, 20);
     }
-    store.game = newGame({ type, teams: { us: $('ngUs').value, them: $('ngThem').value }, target: $('ngTarget').value });
+    store.game = newGame({
+      type,
+      teams: { us: $('ngUs').value, them: $('ngThem').value },
+      target: $('ngTarget').value,
+      deals: $('ngDeals').value,
+      roules: $('ngRoules').value,
+      firstDealer: first,
+    });
     saveStore();
     hand = freshHand();
     showView('game');
@@ -274,15 +325,27 @@ function openNewGameDialog() {
 
 function renderTrump() {
   const el = $('trump');
+  const g = game();
   const opts = [...SUITS];
-  if (game().type === 'manille') opts.push('');
+  if (g.type === 'manille') opts.push('');
+  // manille : roulé imposé quand l'équipe qui distribue n'a plus assez de donnes pour ses roulés
+  const rs = isDealGame(g) ? rouleStatus(g) : null;
+  if (rs?.forced) hand.trump = '';
+  $('trumpTitle').textContent = rs?.nextDealer ? `Atout — choisi par ${teamName(rs.nextDealer)}` : 'Atout';
+  $('rouleWarn').hidden = !rs?.forced;
+  if (rs?.forced) {
+    const t = rs.teams[rs.nextDealer];
+    $('rouleWarn').textContent = `Roulé imposé : ${teamName(rs.nextDealer)} doit encore faire ${t.missing} roulé${t.missing > 1 ? 's' : ''} `
+      + `et n'a plus que ${t.dealsLeft} donne${t.dealsLeft > 1 ? 's' : ''} à distribuer.`;
+  }
   el.classList.toggle('five', opts.length === 5);
   el.innerHTML = '';
   for (const s of opts) {
     const b = document.createElement('button');
-    b.textContent = s ? SUIT_SYMBOL[s] : 'Sans atout';
-    b.title = s ? SUIT_NAME[s] : 'Sans atout';
+    b.textContent = s ? SUIT_SYMBOL[s] : 'Roulé ×2';
+    b.title = s ? SUIT_NAME[s] : 'Roulé : sans atout, compte double';
     b.className = (RED.has(s) ? 'red ' : '') + (s ? '' : 'na ') + (hand.trump === s ? 'on' : '');
+    b.disabled = !!rs?.forced && s !== '';
     b.onclick = () => {
       hand.trump = s;
       renderTrump();
@@ -536,12 +599,11 @@ function renderHand() {
   if (!isBelote && hand.mode === 'capot') hand.mode = 'photo';
   setSeg('mode', hand.mode);
   $('modeCapot').hidden = !isBelote;
-  $('trumpPanel').hidden = hand.mode !== 'photo';
+  $('trumpPanel').hidden = isBelote ? hand.mode !== 'photo' : hand.mode === 'capot';
   $('photoPanel').hidden = hand.mode !== 'photo';
   $('manualPanel').hidden = hand.mode !== 'manual';
   $('capotPanel').hidden = hand.mode !== 'capot';
   $('beloteOptions').hidden = !isBelote;
-  $('manilleOptions').hidden = isBelote;
   $('derRow').hidden = hand.mode !== 'photo';
   setSeg('photoTeam', hand.photoTeam);
   setSeg('manualTeam', hand.manualTeam);
@@ -549,7 +611,6 @@ function renderHand() {
   setSeg('der', hand.der);
   setSeg('belote', hand.belote ?? '');
   setSeg('taker', hand.taker ?? '');
-  setSeg('mult', hand.mult);
   renderAnnouncements();
   renderCards();
   renderManual();
@@ -565,7 +626,10 @@ function saveHand() {
   if (r.error) return;
   const soft = r.warnings?.filter((w) => w.code !== 'manual') ?? [];
   if (soft.length && !confirm(`${soft.map((w) => w.message).join('\n')}\n\nValider quand même ?`)) return;
-  store.game = addHand(game(), handFromResult(r, { cards: hand.mode === 'photo' ? [...hand.cards.keys()] : undefined }));
+  store.game = addHand(game(), handFromResult(r, {
+    cards: hand.mode === 'photo' ? [...hand.cards.keys()] : undefined,
+    roule: game().type === 'manille' && hand.trump === '',
+  }));
   saveStore();
   hand = freshHand();
   showView('game');
@@ -582,7 +646,8 @@ function showView(v) {
   renderTeamLabels();
   if (v === 'game') renderGame();
   else {
-    $('subtitle').textContent = `Donne ${game().hands.length + 1} · ${GAME_TYPES[game().type].label}`;
+    const g = game();
+    $('subtitle').textContent = `Donne ${g.hands.length + 1}${isDealGame(g) ? `/${g.deals}` : ''} · ${GAME_TYPES[g.type].label}`;
     renderTrump();
     renderHand();
   }
@@ -602,7 +667,6 @@ bindSeg('capotTeam', (v) => { hand.capotTeam = v; renderHand(); });
 bindSeg('der', (v) => { hand.der = v; renderHand(); });
 bindSeg('belote', (v) => { hand.belote = v || null; renderHand(); });
 bindSeg('taker', (v) => { hand.taker = v || null; renderHand(); });
-bindSeg('mult', (v) => { hand.mult = Number(v); renderHand(); });
 $('manualInput').addEventListener('input', (e) => { hand.manualValue = e.target.value.trim(); renderHand(); });
 $('photo').addEventListener('change', (e) => onPhoto(e.target.files[0]));
 $('addCard').addEventListener('click', openPicker);

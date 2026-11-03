@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newGame, addHand, computeGame, handFromResult, removeHand, editHandScore } from '../src/game.js';
+import {
+  newGame, addHand, computeGame, handFromResult, removeHand, editHandScore, dealerOf, rouleStatus,
+} from '../src/game.js';
 import { scoreBelote, scoreManille } from '../src/scoring.js';
 
 const H = (us, them, extra = {}) => ({ score: { us, them }, outcome: 'made', reserved: 0, ...extra });
@@ -9,7 +11,7 @@ test('nouvelle partie : valeurs par défaut', () => {
   const g = newGame({ type: 'belote', teams: { us: '  Hugo & Max ', them: '' } });
   assert.equal(g.target, 100);
   assert.deepEqual(g.teams, { us: 'Hugo & Max', them: 'Eux' });
-  assert.equal(newGame({ type: 'manille' }).target, 101);
+  assert.equal(newGame({ type: 'manille' }).deals, 12);
   assert.equal(newGame({ type: 'belote', target: 50 }).target, 50);
 });
 
@@ -77,4 +79,46 @@ test('modifier / supprimer une donne', () => {
   assert.deepEqual(computeGame(g).totals, { us: 23, them: 9 });
   g = removeHand(g, 1);
   assert.deepEqual(computeGame(g).totals, { us: 7, them: 9 });
+});
+
+test('manille : 12 donnes, le donneur alterne, fin après la 12e', () => {
+  let g = newGame({ type: 'manille', firstDealer: 'them' });
+  assert.equal(g.deals, 12);
+  assert.equal(g.roules, 2);
+  assert.equal(g.target, undefined);
+  assert.equal(dealerOf(g, 0), 'them');
+  assert.equal(dealerOf(g, 1), 'us');
+  for (let i = 0; i < 11; i++) g = addHand(g, H(i % 2 ? 5 : 0, i % 2 ? 0 : 3));
+  assert.equal(computeGame(g).winner, null);
+  g = addHand(g, H(0, 0));
+  const r = computeGame(g);
+  assert.equal(r.finishedAt, 11);
+  assert.equal(r.winner, 'us'); // 6×0 + 5×5 = 25 contre 6×3 = 18
+});
+
+test('manille : roulés obligatoires, imposés quand il ne reste plus assez de donnes', () => {
+  let g = newGame({ type: 'manille' }); // nous distribuons aux donnes 1, 3, 5, 7, 9, 11
+  let s = rouleStatus(g);
+  assert.equal(s.nextDealer, 'us');
+  assert.equal(s.forced, false);
+  assert.deepEqual(s.teams.us, { done: 0, missing: 2, dealsLeft: 6 });
+  // 8 donnes sans aucun roulé : il nous reste 2 donnes pour 2 roulés -> imposé
+  for (let i = 0; i < 8; i++) g = addHand(g, H(1, 1));
+  s = rouleStatus(g);
+  assert.equal(s.nextDealer, 'us');
+  assert.deepEqual(s.teams.us, { done: 0, missing: 2, dealsLeft: 2 });
+  assert.equal(s.forced, true);
+  // un roulé fait par nous, puis une donne d'eux : il reste 1 donne pour 1 roulé -> toujours imposé
+  g = addHand(g, H(2, 0, { roule: true }));
+  g = addHand(g, H(1, 1));
+  s = rouleStatus(g);
+  assert.deepEqual(s.teams.us, { done: 1, missing: 1, dealsLeft: 1 });
+  assert.equal(s.forced, true);
+  // eux n'ont fait aucun roulé : leur dernière donne ne suffit plus (manque 2, reste 1)
+  assert.deepEqual(s.teams.them, { done: 0, missing: 2, dealsLeft: 1 });
+});
+
+test('manille : un roulé compte double', () => {
+  const r = scoreManille({ manualPoints: 38, multiplier: 2 });
+  assert.deepEqual(r.score, { us: 16, them: 0 });
 });

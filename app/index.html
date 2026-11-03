@@ -43,6 +43,7 @@
         <p class="hint center" id="reserveNote" hidden></p>
       </section>
 
+      <p class="next-deal" id="nextDeal" hidden></p>
       <button class="big-btn" id="newHandBtn">+ Nouvelle donne</button>
 
       <section class="card-panel" id="handsPanel">
@@ -63,8 +64,9 @@
       </section>
 
       <section class="card-panel" id="trumpPanel">
-        <h2>Atout</h2>
+        <h2 id="trumpTitle">Atout</h2>
         <div class="suits" id="trump"></div>
+        <div class="warn" id="rouleWarn" hidden></div>
       </section>
 
       <!-- mode photo -->
@@ -133,14 +135,6 @@
         </div>
       </section>
 
-      <section class="card-panel" id="manilleOptions" hidden>
-        <h2>Donne</h2>
-        <div class="opt">
-          <span>Multiplicateur</span>
-          <div class="seg small" id="mult"><button data-v="1" class="on">×1</button><button data-v="2">×2</button><button data-v="4">×4</button></div>
-        </div>
-      </section>
-
       <section class="card-panel result" id="result"></section>
 
       <div class="footer-bar">
@@ -176,7 +170,17 @@
       </div>
       <label class="field"><span>Équipe 1</span><input id="ngUs" placeholder="Nous" maxlength="20"></label>
       <label class="field"><span>Équipe 2</span><input id="ngThem" placeholder="Eux" maxlength="20"></label>
-      <label class="field"><span>Partie en</span><input id="ngTarget" type="number" inputmode="numeric" min="1"></label>
+      <label class="field" id="ngTargetField"><span>Partie en (points)</span><input id="ngTarget" type="number" inputmode="numeric" min="1"></label>
+      <div id="ngManilleFields" hidden>
+        <div class="edit-scores">
+          <label class="field"><span>Nombre de donnes</span><input id="ngDeals" type="number" inputmode="numeric" min="2" step="2"></label>
+          <label class="field"><span>Roulés par équipe</span><input id="ngRoules" type="number" inputmode="numeric" min="0"></label>
+        </div>
+        <div class="field">
+          <span>Première donne (distribue et choisit l'atout)</span>
+          <div class="seg wide teamseg-ng" id="ngFirst"><button type="button" data-v="us" class="on">Équipe 1</button><button type="button" data-v="them">Équipe 2</button></div>
+        </div>
+      </div>
       <p class="hint" id="ngHint"></p>
       <div class="menu">
         <button class="primary" value="ok">Commencer</button>

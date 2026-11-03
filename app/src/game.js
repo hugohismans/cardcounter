@@ -2,19 +2,69 @@
 // Fonctions pures : l'état est un objet JSON simple (sauvegardé tel quel).
 
 export const GAME_TYPES = {
-  belote: { label: 'Belote', target: 100 }, // 1000 points, compté /10
-  manille: { label: 'Manille', target: 101 },
+  // belote : partie en points (1000, compté /10)
+  belote: { label: 'Belote', target: 100 },
+  // manille : partie en un nombre fixe de donnes ("cartés"), avec des roulés
+  // (sans atout, comptés double) obligatoires pour chaque équipe
+  manille: { label: 'Manille', deals: 12, roules: 2 },
 };
 
-export function newGame({ type = 'belote', teams = {}, target } = {}) {
-  return {
+const other = (k) => (k === 'us' ? 'them' : 'us');
+const posInt = (v, d) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(v) : d);
+
+export function newGame({ type = 'belote', teams = {}, target, deals, roules, firstDealer = 'us' } = {}) {
+  const g = {
     id: Date.now().toString(36),
     type,
     teams: { us: teams.us?.trim() || 'Nous', them: teams.them?.trim() || 'Eux' },
-    target: Number(target) > 0 ? Number(target) : GAME_TYPES[type].target,
     hands: [],
     createdAt: new Date().toISOString(),
   };
+  if (type === 'manille') {
+    g.deals = posInt(deals, GAME_TYPES.manille.deals);
+    g.roules = Math.min(Math.floor(g.deals / 2), Math.max(0, Number(roules ?? GAME_TYPES.manille.roules) || 0));
+    g.firstDealer = firstDealer === 'them' ? 'them' : 'us';
+  } else {
+    g.target = posInt(target, GAME_TYPES.belote.target);
+  }
+  return g;
+}
+
+/** Partie jouée en un nombre fixe de donnes (manille) plutôt qu'en points. */
+export const isDealGame = (game) => game.type === 'manille' && game.deals > 0;
+
+/** Équipe qui distribue (et choisit l'atout) à la donne `index` : alterne à chaque donne. */
+export function dealerOf(game, index) {
+  const first = game.firstDealer ?? 'us';
+  return index % 2 === 0 ? first : other(first);
+}
+
+/**
+ * Suivi des roulés obligatoires.
+ * Renvoie, pour chaque équipe, les roulés faits / restant à faire et les donnes
+ * qu'il lui reste à distribuer ; et pour la donne suivante, qui distribue et si
+ * le roulé est imposé (plus assez de donnes pour faire les roulés manquants).
+ */
+export function rouleStatus(game) {
+  const done = { us: 0, them: 0 };
+  const dealt = { us: 0, them: 0 };
+  game.hands.forEach((h, i) => {
+    const d = dealerOf(game, i);
+    dealt[d] += 1;
+    if (h.roule) done[d] += 1;
+  });
+  const perTeam = { us: 0, them: 0 };
+  for (let i = 0; i < game.deals; i++) perTeam[dealerOf(game, i)] += 1;
+  const teams = {};
+  for (const k of ['us', 'them']) {
+    const missing = Math.max(0, game.roules - done[k]);
+    const dealsLeft = Math.max(0, perTeam[k] - dealt[k]);
+    teams[k] = { done: done[k], missing, dealsLeft };
+  }
+  const next = game.hands.length;
+  const nextDealer = next < game.deals ? dealerOf(game, next) : null;
+  const forced = !!nextDealer && teams[nextDealer].missing > 0 && teams[nextDealer].missing >= teams[nextDealer].dealsLeft;
+  return { teams, nextDealer, forced, next };
 }
 
 /**
@@ -57,8 +107,13 @@ export function computeGame(game) {
     }
     totals.us += hand.score.us + bonus.us;
     totals.them += hand.score.them + bonus.them;
-    rows.push({ index, hand, bonus, total: { ...totals } });
-    if (winner === null && (totals.us >= game.target || totals.them >= game.target) && totals.us !== totals.them) {
+    rows.push({ index, hand, bonus, total: { ...totals }, dealer: isDealGame(game) ? dealerOf(game, index) : null });
+    if (isDealGame(game)) {
+      if (index === game.deals - 1) {
+        winner = totals.us === totals.them ? 'tie' : totals.us > totals.them ? 'us' : 'them';
+        finishedAt = index;
+      }
+    } else if (winner === null && (totals.us >= game.target || totals.them >= game.target) && totals.us !== totals.them) {
       winner = totals.us > totals.them ? 'us' : 'them';
       finishedAt = index;
     }
