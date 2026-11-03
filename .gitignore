@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+detector/data/
+detector/runs/
+detector/assets/decks/svgcards/
+detector/assets/face_art/
+*.pt
+*.log

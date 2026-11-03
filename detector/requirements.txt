@@ -1,0 +1,8 @@
+# PyTorch CPU : pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+ultralytics>=8.4
+opencv-python-headless
+numpy
+pillow
+onnx
+onnxslim
+onnxruntime
