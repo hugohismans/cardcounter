@@ -169,3 +169,15 @@ button.danger { color: var(--red); }
 .field { display: grid; gap: 4px; margin: 10px 0; font-size: 14px; color: var(--muted); }
 .field input { font: inherit; font-size: 16px; color: var(--ink); padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); }
 .edit-scores { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* ---- bannière d'installation ---- */
+.install {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius);
+  background: var(--panel); border: 1px solid var(--line);
+}
+.install img { border-radius: 10px; flex: none; }
+.install-text { flex: 1; font-size: 14px; }
+.install .primary { padding: 8px 14px; border-radius: 10px; border: 0; font: inherit; font-weight: 600; }
+.ios-share { display: inline-block; border: 1px solid var(--line); border-radius: 6px; padding: 0 5px; }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand img { border-radius: 8px; box-shadow: 0 0 0 1px rgb(255 255 255 / .25); }

@@ -620,5 +620,46 @@ showView('game');
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js');
 }
+
+// ---------------------------------------------------------------------------
+// Installation comme une appli (écran d'accueil)
+// ---------------------------------------------------------------------------
+
+const INSTALL_KEY = 'cardcounter.installDismissed';
+const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let installDismissed = false;
+try { installDismissed = localStorage.getItem(INSTALL_KEY) === '1'; } catch { /* ignore */ }
+let installPrompt = null;
+
+function showInstall(html, withButton) {
+  if (standalone || installDismissed) return;
+  $('installText').innerHTML = html;
+  $('installBtn').hidden = !withButton;
+  $('installBox').hidden = false;
+}
+// Android / Chrome / Edge : le navigateur propose l'installation
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  showInstall('<b>Installer l’appli</b><br>Sur l’écran d’accueil, utilisable hors ligne.', true);
+});
+$('installBtn').addEventListener('click', async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice;
+  installPrompt = null;
+  $('installBox').hidden = true;
+});
+window.addEventListener('appinstalled', () => { $('installBox').hidden = true; });
+// iPhone / iPad : pas de bouton possible, on explique la marche à suivre
+if (isIOS) {
+  showInstall('<b>Installer l’appli</b><br>Touchez <span class="ios-share">⬆︎</span> Partager, puis « Sur l’écran d’accueil ».', false);
+}
+$('installClose').addEventListener('click', () => {
+  $('installBox').hidden = true;
+  try { localStorage.setItem(INSTALL_KEY, '1'); } catch { /* ignore */ }
+});
 // précharge le modèle en arrière-plan
 getDetector().then((d) => d.load()).catch((e) => console.warn('modèle non chargé', e));

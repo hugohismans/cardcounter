@@ -1,9 +1,20 @@
 {
-  "name": "Compteur de points belote / manille",
-  "short_name": "Points",
+  "id": "./",
+  "name": "Compteur de points — Belote & Manille",
+  "short_name": "Compteur",
+  "description": "Photographiez vos plis, l'appli reconnaît les cartes et compte les points. Fonctionne hors ligne.",
+  "lang": "fr",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#f3f1ea",
+  "orientation": "portrait",
+  "background_color": "#0f5132",
   "theme_color": "#0f5132",
-  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
 }

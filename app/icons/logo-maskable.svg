@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="felt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17704a"/>
+      <stop offset="1" stop-color="#0c4a30"/>
+    </linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity=".35"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#felt)"/>
+  <g id="content" transform="translate(256 256) scale(0.74) translate(-256 -256)">
+    <!-- carte arrière -->
+    <g transform="rotate(14 300 300)" filter="url(#sh)">
+      <rect x="196" y="112" width="196" height="276" rx="22" fill="#f4f1e8"/>
+      <path d="M352 150c-30 30-52 46-52 68a24 24 0 0 0 44 12c-2 16-6 26-14 34h44c-8-8-12-18-14-34a24 24 0 0 0 44-12c0-22-22-38-52-68z" fill="#1d1d1b"/>
+    </g>
+    <!-- carte avant -->
+    <g transform="rotate(-10 220 300)" filter="url(#sh)">
+      <rect x="112" y="124" width="196" height="276" rx="22" fill="#ffffff"/>
+      <text x="132" y="190" font-family="Georgia, 'DejaVu Serif', serif" font-size="58" font-weight="700" fill="#c8242c">A</text>
+      <path d="M210 330c-44-32-74-58-74-90a34 34 0 0 1 74-14 34 34 0 0 1 74 14c0 32-30 58-74 90z" fill="#c8242c"/>
+    </g>
+    <!-- pastille de score -->
+    <g filter="url(#sh)">
+      <circle cx="372" cy="378" r="74" fill="#f2b53a"/>
+      <circle cx="372" cy="378" r="62" fill="none" stroke="#fff3cf" stroke-width="6" opacity=".7"/>
+      <path d="M338 380 l24 24 46 -50" fill="none" stroke="#0c4a30" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+</svg>
