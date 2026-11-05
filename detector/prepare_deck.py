@@ -142,6 +142,14 @@ def estimate_index_box(card: np.ndarray):
     return [(cols[0] + x0) / W, (rows[0] + y0) / H, (cols[1] + x0) / W, (rows[1] + y0) / H]
 
 
+def ink_ratio(card: np.ndarray, box) -> float:
+    """Proportion de pixels d'encre (nettement plus sombres que le papier) dans une boîte normalisée."""
+    H, W = card.shape[:2]
+    gray = cv2.cvtColor(card, cv2.COLOR_BGR2GRAY)
+    sub = gray[int(box[1] * H):int(box[3] * H), int(box[0] * W):int(box[2] * W)]
+    return float((sub < np.median(gray) - 50).mean()) if sub.size else 0.0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("photos", nargs="+")
@@ -176,8 +184,16 @@ def main():
     boxes = [b for b in (estimate_index_box(c) for c in done.values()) if b]
     b = np.median(np.array(boxes), axis=0) if boxes else np.array([0.03, 0.02, 0.18, 0.26])
     b = [float(b[0]) - 0.01, float(b[1]) - 0.01, float(b[2]) + 0.01, float(b[3]) + 0.01]
-    meta = {"source": "photos utilisateur", "weight": a.weight, "corner_radius": 0.05,
-            "index_boxes": [b, [1 - b[2], 1 - b[3], 1 - b[0], 1 - b[1]]]}
+    boxes = [b, [1 - b[2], 1 - b[3], 1 - b[0], 1 - b[1]]]  # haut-gauche, bas-droit (tourné 180°)
+    # Jeux français : souvent un index dans les 4 coins. On compare l'encre du coin
+    # haut-droit (boîte miroir) à celle du coin haut-gauche.
+    tr = [1 - b[2], b[1], 1 - b[0], b[3]]
+    ratio = np.median([ink_ratio(c, tr) / max(ink_ratio(c, b), 1e-6) for c in done.values()])
+    four = ratio > 0.5
+    if four:
+        boxes += [tr, [b[0], 1 - b[3], b[2], 1 - b[1]]]  # haut-droit, bas-gauche
+    print(f"index dans les 4 coins : {'oui' if four else 'non'} (encre coin haut-droit / haut-gauche = {ratio:.2f})")
+    meta = {"source": "photos utilisateur", "weight": a.weight, "corner_radius": 0.05, "index_boxes": boxes}
     (out / "deck.json").write_text(json.dumps(meta, indent=2))
 
     # planche de contrôle
@@ -191,8 +207,9 @@ def main():
             cv2.rectangle(c, (int(bx[0] * W), int(bx[1] * H)), (int(bx[2] * W), int(bx[3] * H)), (0, 200, 0), 2)
         cv2.putText(c, cid, (60, H // 2), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
         tiles.append(c)
-    h = min(t.shape[0] for t in tiles)
-    tiles = [t[:h] for t in tiles] + [np.zeros_like(tiles[0][:h])] * ((-len(tiles)) % 8)
+    h = max(t.shape[0] for t in tiles)
+    tiles = [cv2.resize(t, (200, h)) for t in tiles]
+    tiles += [np.zeros_like(tiles[0])] * ((-len(tiles)) % 8)
     sheet = np.vstack([np.hstack(tiles[i:i + 8]) for i in range(0, len(tiles), 8)])
     cv2.imwrite(str(out / "_controle.jpg"), sheet)
     print(f"{len(done)}/32 cartes -> {out} (vérifier {out / '_controle.jpg'})")

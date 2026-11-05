@@ -491,15 +491,20 @@ def _deck_signature():
 
 def load_decks_cached():
     sig = _deck_signature()
+    # on stocke des tuples simples (pas la classe Deck) : le cache se relit quel que
+    # soit le module qui l'a écrit (script lancé directement ou importé)
     if DECK_CACHE.exists():
-        with open(DECK_CACHE, "rb") as f:
-            cached_sig, decks = pickle.load(f)
-        if cached_sig == sig:
-            return decks
+        try:
+            with open(DECK_CACHE, "rb") as f:
+                cached_sig, raw = pickle.load(f)
+            if cached_sig == sig:
+                return [Deck(n, c, w) for n, c, w in raw]
+        except Exception:
+            pass  # cache d'une ancienne version : on le reconstruit
     decks = build_decks()
     DECK_CACHE.parent.mkdir(parents=True, exist_ok=True)
     with open(DECK_CACHE, "wb") as f:
-        pickle.dump((sig, decks), f, protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump((sig, [(d.name, d.cards, d.weight) for d in decks]), f, protocol=pickle.HIGHEST_PROTOCOL)
     return decks
 
 
