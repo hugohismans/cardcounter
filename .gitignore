@@ -7,3 +7,4 @@ detector/assets/
 *.log
 app/node_modules/
 app/vendor/
+!detector/weights/best.pt
